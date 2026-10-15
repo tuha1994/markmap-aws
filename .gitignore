@@ -1,1 +1,28 @@
+# Local worktrees
 .worktrees/
+
+# Dependencies and build output
+node_modules/
+dist/
+
+# Environment configuration
+.env*
+!.env.example
+
+# Firebase credentials and emulator state
+firebase-service-account*.json
+*service-account*.json
+serviceAccountKey.json
+.firebase/
+firebase-emulator-data/
+emulator-data/
+firestore-debug.log
+firebase-debug.log
+ui-debug.log
+
+# User data and prohibited private content
+exports/
+map-exports/
+internal-content/
+private-content/
+aws-partner-internal/
