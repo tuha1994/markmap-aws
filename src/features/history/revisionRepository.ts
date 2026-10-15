@@ -12,10 +12,11 @@ import {
   type Firestore
 } from 'firebase/firestore';
 
-import type { RevisionReason } from './revisionTypes';
+import type { StoredMindMap } from '../mindmaps/mindMapRepository';
+import type { Revision, RevisionReason } from './revisionTypes';
 
 export type SaveResult =
-  | { status: 'saved'; revisionId: string; prunePending: boolean }
+  | { status: 'saved'; revisionId: string | null; prunePending: boolean }
   | { status: 'prune-pending' }
   | { status: 'conflict' }
   | { status: 'error'; error: Error };
@@ -31,6 +32,66 @@ export type CreateRevisionAndSaveMapInput = {
   reason: RevisionReason;
 };
 
+export type StoredRevision = Revision & { id: string };
+
+export async function listRevisions(database: Firestore, mapId: string): Promise<StoredRevision[]> {
+  const mapReference = doc(database, 'mindMaps', mapId);
+  const revisions = await getDocs(query(
+    collection(mapReference, 'revisions'),
+    orderBy('createdAt', 'desc')
+  ));
+  return revisions.docs.map((revision) => ({ id: revision.id, ...(revision.data() as Revision) }));
+}
+
+export async function restoreRevision(
+  database: Firestore,
+  map: StoredMindMap,
+  revision: Revision
+): Promise<void> {
+  if (revision.mapId !== map.id || revision.ownerUid !== map.ownerUid) {
+    throw new Error('The revision does not belong to this mind map.');
+  }
+
+  const mapReference = doc(database, 'mindMaps', map.id);
+  const revisionsReference = collection(mapReference, 'revisions');
+  const protectionReference = doc(revisionsReference);
+  await runTransaction(database, async (transaction) => {
+    const mapSnapshot = await transaction.get(mapReference);
+    if (!mapSnapshot.exists()
+      || mapSnapshot.data().ownerUid !== map.ownerUid
+      || mapSnapshot.data().contentVersion !== map.contentVersion) {
+      throw new RevisionConflictError();
+    }
+
+    const nextContentVersion = map.contentVersion + 1;
+    const timestamp = serverTimestamp();
+    transaction.set(protectionReference, {
+      ownerUid: map.ownerUid,
+      mapId: map.id,
+      sourceContentVersion: nextContentVersion,
+      title: map.title,
+      folderId: map.folderId,
+      markdown: map.markdown,
+      reason: 'restore-protection',
+      createdAt: timestamp,
+      createdByUid: map.ownerUid
+    });
+    transaction.update(mapReference, {
+      folderId: revision.folderId,
+      title: revision.title,
+      titleLower: revision.title.toLocaleLowerCase(),
+      markdown: revision.markdown,
+      contentSearchText: revision.markdown.toLocaleLowerCase(),
+      contentVersion: nextContentVersion,
+      currentRevisionId: protectionReference.id,
+      currentRevisionAt: timestamp,
+      revisionPrunePending: false,
+      updatedAt: timestamp
+    });
+  });
+  await pruneOldestExcessRevision(database, mapReference, revisionsReference);
+}
+
 export async function createRevisionAndSaveMap(
   database: Firestore,
   input: CreateRevisionAndSaveMapInput
@@ -39,7 +100,8 @@ export async function createRevisionAndSaveMap(
   const revisionsReference = collection(mapReference, 'revisions');
   const revisionReference = doc(revisionsReference);
 
-  let autosaveSuppressed = false;
+  let autosavePrunePending = false;
+  let autosaveThrottled = false;
   try {
     await runTransaction(database, async (transaction) => {
       const mapSnapshot = await transaction.get(mapReference);
@@ -49,27 +111,39 @@ export async function createRevisionAndSaveMap(
       }
 
       const map = mapSnapshot.data();
-      if (input.reason === 'autosave' && map.revisionPrunePending === true) {
-        autosaveSuppressed = true;
-        return;
-      }
       if (map.contentVersion !== input.expectedContentVersion) {
         throw new RevisionConflictError();
       }
-
       const nextContentVersion = input.expectedContentVersion + 1;
       const timestamp = serverTimestamp();
-      transaction.update(mapReference, {
+      const mapUpdate = {
         folderId: input.folderId,
         title: input.title,
         titleLower: input.title.toLocaleLowerCase(),
         markdown: input.markdown,
         contentSearchText: input.contentSearchText,
         contentVersion: nextContentVersion,
+        updatedAt: timestamp
+      };
+
+      if (input.reason === 'autosave') {
+        if (map.revisionPrunePending === true) {
+          autosavePrunePending = true;
+          transaction.update(mapReference, mapUpdate);
+          return;
+        }
+        if (isRecentSnapshot(map.currentRevisionAt)) {
+          autosaveThrottled = true;
+          transaction.update(mapReference, mapUpdate);
+          return;
+        }
+      }
+
+      transaction.update(mapReference, {
+        ...mapUpdate,
         currentRevisionId: revisionReference.id,
         currentRevisionAt: timestamp,
-        revisionPrunePending: false,
-        updatedAt: timestamp
+        revisionPrunePending: false
       });
       transaction.set(revisionReference, {
         ownerUid: input.ownerUid,
@@ -91,8 +165,11 @@ export async function createRevisionAndSaveMap(
     return { status: 'error', error: toError(error) };
   }
 
-  if (autosaveSuppressed) {
+  if (autosavePrunePending) {
     return { status: 'prune-pending' };
+  }
+  if (autosaveThrottled) {
+    return { status: 'saved', revisionId: null, prunePending: false };
   }
 
   const prunePending = await pruneOldestExcessRevision(database, mapReference, revisionsReference);
@@ -121,6 +198,13 @@ async function pruneOldestExcessRevision(
     }
     return true;
   }
+}
+
+function isRecentSnapshot(createdAt: unknown): boolean {
+  return createdAt !== null
+    && typeof createdAt === 'object'
+    && typeof (createdAt as { toMillis?: unknown }).toMillis === 'function'
+    && Date.now() - (createdAt as { toMillis: () => number }).toMillis() < 30_000;
 }
 
 class RevisionConflictError extends Error {}

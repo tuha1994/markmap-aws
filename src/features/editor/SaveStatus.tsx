@@ -11,7 +11,8 @@ const labels: Record<SaveStatusValue, string> = {
   unsaved: 'Unsaved changes',
   offlinePending: 'Offline — changes pending',
   error: 'Save failed',
-  conflict: 'Remote change detected'
+  conflict: 'Remote change detected',
+  prunePending: 'History cleanup pending'
 };
 
 export function SaveStatus({ status, onRetry }: Props) {
@@ -19,7 +20,7 @@ export function SaveStatus({ status, onRetry }: Props) {
   return (
     <section aria-live="polite" aria-label="Save status">
       <p>{labels[status]}</p>
-      {status === 'error' && onRetry ? <button type="button" onClick={onRetry}>Retry</button> : null}
+      {['error', 'prunePending'].includes(status) && onRetry ? <button type="button" onClick={onRetry}>Retry</button> : null}
       {isMemoryOnly ? (
         <p role="note">These changes exist only in this browser session. Refresh, closing this tab, or a browser crash can lose them.</p>
       ) : null}

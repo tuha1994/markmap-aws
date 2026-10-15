@@ -26,12 +26,55 @@ function SaveQueueHarness({ repository, map = { id: 'map-1', ...makeMindMap() } 
       <button onClick={() => queue.setDraft('first draft')}>First</button>
       <button onClick={() => queue.setDraft('second draft')}>Second</button>
       <button onClick={() => queue.retry()}>Retry</button>
+      <button onClick={() => queue.saveVersion()}>Save version</button>
       <button onClick={() => queue.resolveConflict('keepMine')}>Keep mine</button>
     </>
   );
 }
 
 describe('useSaveQueue', () => {
+  it('surfaces pending history cleanup from the current map state', () => {
+    const repository: SaveRepository = { update: vi.fn() };
+    render(<SaveQueueHarness repository={repository} map={{ id: 'map-1', ...makeMindMap({ revisionPrunePending: true }) }} />);
+
+    expect(screen.getByTestId('status')).toHaveTextContent('prunePending');
+  });
+
+  it('retries pending history cleanup with a manual protected save', async () => {
+    vi.useFakeTimers();
+    const saveRevision = vi.fn()
+      .mockResolvedValueOnce({ status: 'prune-pending' })
+      .mockResolvedValueOnce({ status: 'saved', revisionId: 'revision-2', prunePending: false });
+    const repository = { update: vi.fn(), saveRevision } as SaveRepository & { saveRevision: typeof saveRevision };
+    render(<SaveQueueHarness repository={repository} />);
+
+    screen.getByRole('button', { name: 'First' }).click();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(screen.getByTestId('status')).toHaveTextContent('prunePending');
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Retry' }).click();
+      await Promise.resolve();
+    });
+    expect(saveRevision).toHaveBeenLastCalledWith(expect.objectContaining({ reason: 'manual' }));
+    vi.useRealTimers();
+  });
+
+  it('uses a manual immutable revision when Save version is requested', async () => {
+    const saveRevision = vi.fn().mockResolvedValue({ status: 'saved', revisionId: 'revision-1', prunePending: false });
+    const repository = { update: vi.fn().mockResolvedValue({ status: 'updated', contentVersion: 2 }), saveRevision } as SaveRepository & { saveRevision: typeof saveRevision };
+    render(<SaveQueueHarness repository={repository} />);
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'First' }).click();
+      screen.getByRole('button', { name: 'Save version' }).click();
+      await Promise.resolve();
+    });
+
+    expect(saveRevision).toHaveBeenCalledWith(expect.objectContaining({ markdown: 'first draft', reason: 'manual' }));
+    expect(repository.update).not.toHaveBeenCalled();
+  });
+
   it('does not mark draft generation N+1 saved when N resolves late', async () => {
     vi.useFakeTimers();
     const firstWrite = deferred<{ status: 'updated'; contentVersion: number }>();

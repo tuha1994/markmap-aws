@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { makeFolder, makeMindMap } from '../test/factories';
 import { moveMapsAndArchiveFolder, subscribeFolders } from '../features/folders/folderRepository';
+import { createRevisionAndSaveMap, listRevisions } from '../features/history/revisionRepository';
 import { archiveMindMap, createMindMap, updateMindMapVersioned } from '../features/mindmaps/mindMapRepository';
 import { PrivateWorkspace } from './App';
 
@@ -35,6 +36,10 @@ vi.mock('../features/mindmaps/mindMapRepository', async (importOriginal) => {
     updateMindMapVersioned: vi.fn()
   };
 });
+vi.mock('../features/history/revisionRepository', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../features/history/revisionRepository')>();
+  return { ...actual, createRevisionAndSaveMap: vi.fn(), listRevisions: vi.fn(), restoreRevision: vi.fn() };
+});
 vi.mock('../features/preview/MarkmapPreview', () => ({
   MarkmapPreview: () => <section aria-label="Mind map preview" />
 }));
@@ -42,6 +47,8 @@ vi.mock('../features/preview/MarkmapPreview', () => ({
 const mockedCreateMindMap = vi.mocked(createMindMap);
 const mockedArchiveMindMap = vi.mocked(archiveMindMap);
 const mockedUpdateMindMapVersioned = vi.mocked(updateMindMapVersioned);
+const mockedCreateRevisionAndSaveMap = vi.mocked(createRevisionAndSaveMap);
+const mockedListRevisions = vi.mocked(listRevisions);
 const mockedSubscribeFolders = vi.mocked(subscribeFolders);
 const mockedMoveMapsAndArchiveFolder = vi.mocked(moveMapsAndArchiveFolder);
 
@@ -58,6 +65,8 @@ describe('PrivateWorkspace', () => {
     mockedCreateMindMap.mockResolvedValue(map as never);
     mockedArchiveMindMap.mockResolvedValue({ status: 'updated', contentVersion: 0 });
     mockedUpdateMindMapVersioned.mockResolvedValue({ status: 'updated', contentVersion: 2 });
+    mockedCreateRevisionAndSaveMap.mockResolvedValue({ status: 'saved', revisionId: 'revision-1', prunePending: false });
+    mockedListRevisions.mockResolvedValue([]);
     mockedSubscribeFolders.mockImplementation((_database, _ownerUid, listener) => {
       listener([{ ...makeFolder({ name: 'Planning' }), id: 'folder-1' }]);
       return vi.fn();
@@ -199,9 +208,9 @@ describe('PrivateWorkspace', () => {
 
   it('exposes Retry for a failed save and invokes the queue retry path', async () => {
     vi.useFakeTimers();
-    mockedUpdateMindMapVersioned
-      .mockResolvedValueOnce({ status: 'error', error: new Error('temporary failure') } as never)
-      .mockResolvedValueOnce({ status: 'updated', contentVersion: 2 });
+    mockedCreateRevisionAndSaveMap
+      .mockResolvedValueOnce({ status: 'error', error: new Error('temporary failure') })
+      .mockResolvedValueOnce({ status: 'saved', revisionId: 'revision-2', prunePending: false });
     render(<PrivateWorkspace />);
 
     fireEvent.change(screen.getByRole('textbox', { name: 'Markdown' }), { target: { value: '# Retry draft' } });
@@ -214,7 +223,8 @@ describe('PrivateWorkspace', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
       await Promise.resolve();
     });
-    expect(mockedUpdateMindMapVersioned).toHaveBeenCalledTimes(2);
+    expect(mockedCreateRevisionAndSaveMap).toHaveBeenCalledTimes(2);
+    expect(mockedCreateRevisionAndSaveMap).toHaveBeenLastCalledWith({}, expect.objectContaining({ reason: 'manual' }));
     expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Saved');
     vi.useRealTimers();
   });

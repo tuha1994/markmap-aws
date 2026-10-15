@@ -12,6 +12,9 @@ import { useDirtyGuard } from '../features/editor/useDirtyGuard';
 import { useSaveQueue, type SaveStatus as SaveStatusValue } from '../features/editor/useSaveQueue';
 import { DeleteFolderDialog } from '../features/folders/DeleteFolderDialog';
 import { FolderSidebar } from '../features/folders/FolderSidebar';
+import { RestoreRevisionDialog } from '../features/history/RestoreRevisionDialog';
+import { VersionHistoryPanel } from '../features/history/VersionHistoryPanel';
+import { createRevisionAndSaveMap, listRevisions, restoreRevision, type StoredRevision } from '../features/history/revisionRepository';
 import { moveMapsAndArchiveFolder, subscribeFolders, type StoredFolder } from '../features/folders/folderRepository';
 import { getFirebaseClient } from '../lib/firebase/client';
 import { archiveMindMap, createMindMap, updateMindMapVersioned, type StoredMindMap } from '../features/mindmaps/mindMapRepository';
@@ -49,9 +52,25 @@ function MapWorkspace({ sidebar, map, database, onStatus, onRetryChange }: MapWo
 }
 
 function SelectedMapWorkspace({ sidebar, map, database, onStatus, onRetryChange }: Omit<MapWorkspaceProps, 'map'> & { map: StoredMindMap }) {
-  const repository = useMemo(() => ({ update: (input: Parameters<typeof updateMindMapVersioned>[1]) => updateMindMapVersioned(database, input) }), [database]);
+  const repository = useMemo(() => ({
+    update: (input: Parameters<typeof updateMindMapVersioned>[1]) => updateMindMapVersioned(database, input),
+    saveRevision: (input: Parameters<typeof createRevisionAndSaveMap>[1]) => createRevisionAndSaveMap(database, input)
+  }), [database]);
   const queue = useSaveQueue(map, repository);
+  const [revisions, setRevisions] = useState<StoredRevision[]>([]);
+  const [revisionToRestore, setRevisionToRestore] = useState<StoredRevision | null>(null);
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restoreError, setRestoreError] = useState(false);
   useDirtyGuard(queue.status === 'unsaved' || queue.status === 'offlinePending' || queue.status === 'error');
+
+  useEffect(() => {
+    let cancelled = false;
+    void listRevisions(database, map.id).then(
+      (nextRevisions) => { if (!cancelled) setRevisions(nextRevisions); },
+      () => { if (!cancelled) setRestoreError(true); }
+    );
+    return () => { cancelled = true; };
+  }, [database, map.id, map.currentRevisionId]);
 
   useEffect(() => onStatus(queue.status), [onStatus, queue.status]);
   useEffect(() => {
@@ -59,9 +78,30 @@ function SelectedMapWorkspace({ sidebar, map, database, onStatus, onRetryChange 
     return () => onRetryChange(null);
   }, [onRetryChange, queue.retry]);
 
+  async function confirmRestore() {
+    if (!revisionToRestore) return;
+    setRestoreBusy(true);
+    setRestoreError(false);
+    try {
+      await restoreRevision(database, map, revisionToRestore);
+      setRevisionToRestore(null);
+      setRevisions(await listRevisions(database, map.id));
+    } catch {
+      setRestoreError(true);
+    } finally {
+      setRestoreBusy(false);
+    }
+  }
+
+  const history = <VersionHistoryPanel revisions={revisions} onRestore={setRevisionToRestore} onSaveVersion={queue.saveVersion} />;
   const editor = <MarkdownEditor value={queue.draft} onChange={queue.setDraft} />;
   const preview = <MarkmapPreview markdown={queue.draft} />;
-  return <><AppShell sidebar={sidebar} editor={editor} preview={preview} /><ResponsivePaneTabs maps={sidebar} editor={editor} preview={preview} /></>;
+  return <>
+    {restoreError ? <p role="alert">The revision could not be restored.</p> : null}
+    <AppShell sidebar={<>{sidebar}{history}</>} editor={editor} preview={preview} />
+    <ResponsivePaneTabs maps={<>{sidebar}{history}</>} editor={editor} preview={preview} />
+    {revisionToRestore ? <RestoreRevisionDialog revision={revisionToRestore} onRestore={() => void confirmRestore()} onCancel={() => setRevisionToRestore(null)} busy={restoreBusy} /> : null}
+  </>;
 }
 
 export function PrivateWorkspace() {
@@ -165,7 +205,7 @@ export function PrivateWorkspace() {
     <main aria-label="Markmap AWS workspace">
       <header className="workspace-header">
         <h1>{selectedMap?.title ?? 'Private workspace'}</h1>
-        <SaveStatus status={saveStatus} onRetry={saveStatus === 'error' ? retryActiveSave : undefined} />
+        <SaveStatus status={saveStatus} onRetry={['error', 'prunePending'].includes(saveStatus) ? retryActiveSave : undefined} />
         {operationError ? <p role="alert">The map action could not be completed.</p> : null}
         <button type="button" onClick={() => void signOut()}>Sign out</button>
       </header>

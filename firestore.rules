@@ -240,6 +240,7 @@ service cloud.firestore {
         allow create: if ownsActiveParentMap(mapId)
           && validRevision(request.resource.data, mapId)
           && validFolderReference(request.resource.data.folderId);
+        allow update: if false;
         allow delete: if ownsActiveParentMap(mapId)
           && resource.data.ownerUid == request.auth.uid
           && resource.data.mapId == mapId

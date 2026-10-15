@@ -130,7 +130,7 @@ describe('Firestore repository regressions', () => {
     })).resolves.toEqual({ status: 'prune-pending' });
 
     expect((await getDoc(doc(database, 'mindMaps', 'pending-map'))).data()).toMatchObject({
-      title: 'Map', contentVersion: 4, revisionPrunePending: true
+      title: 'Updated map', markdown: '# Updated', contentVersion: 5, revisionPrunePending: true
     });
     expect((await getDocs(collection(database, 'mindMaps', 'pending-map', 'revisions'))).docs).toHaveLength(0);
   });
