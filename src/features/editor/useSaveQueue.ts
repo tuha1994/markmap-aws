@@ -11,6 +11,7 @@ export type RevisionSaveInput = UpdateMindMapInput & { reason: RevisionReason };
 export type SaveRepository = {
   update(input: UpdateMindMapInput): Promise<UpdateResult>;
   saveRevision?(input: RevisionSaveInput): Promise<SaveResult>;
+  retryRevisionPrune?(mapId: string): Promise<boolean>;
 };
 
 export type ConflictChoice = 'keepMine' | 'useRemote';
@@ -148,8 +149,25 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository): Sa
   }, [clearTimer, save]);
 
   const retry = useCallback(() => {
+    if (status === 'prunePending' && repository.retryRevisionPrune) {
+      const retryMapId = mapRef.current.id;
+      const retryMapSession = mapSession.current;
+      setStatus('saving');
+      void repository.retryRevisionPrune(retryMapId).then((prunePending) => {
+        if (retryMapSession !== mapSession.current || retryMapId !== mapRef.current.id) {
+          return;
+        }
+        setStatus(prunePending ? 'prunePending' : 'saved');
+      }, () => {
+        if (retryMapSession !== mapSession.current || retryMapId !== mapRef.current.id) {
+          return;
+        }
+        setStatus(isOffline() ? 'offlinePending' : 'error');
+      });
+      return;
+    }
     save(mapSession.current, 'manual');
-  }, [save]);
+  }, [repository, save, status]);
 
   const saveVersion = useCallback(() => {
     save(mapSession.current, 'manual');

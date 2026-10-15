@@ -14,7 +14,7 @@ import { DeleteFolderDialog } from '../features/folders/DeleteFolderDialog';
 import { FolderSidebar } from '../features/folders/FolderSidebar';
 import { RestoreRevisionDialog } from '../features/history/RestoreRevisionDialog';
 import { VersionHistoryPanel } from '../features/history/VersionHistoryPanel';
-import { createRevisionAndSaveMap, listRevisions, restoreRevision, type StoredRevision } from '../features/history/revisionRepository';
+import { createRevisionAndSaveMap, listRevisions, restoreRevision, retryRevisionPrune, type StoredRevision } from '../features/history/revisionRepository';
 import { moveMapsAndArchiveFolder, subscribeFolders, type StoredFolder } from '../features/folders/folderRepository';
 import { getFirebaseClient } from '../lib/firebase/client';
 import { archiveMindMap, createMindMap, updateMindMapVersioned, type StoredMindMap } from '../features/mindmaps/mindMapRepository';
@@ -48,13 +48,14 @@ function MapWorkspace({ sidebar, map, database, onStatus, onRetryChange }: MapWo
     return <><AppShell sidebar={sidebar} editor={editor} preview={preview} /><ResponsivePaneTabs maps={sidebar} editor={editor} preview={preview} /></>;
   }
 
-  return <SelectedMapWorkspace sidebar={sidebar} map={map} database={database} onStatus={onStatus} onRetryChange={onRetryChange} />;
+  return <SelectedMapWorkspace key={map.id} sidebar={sidebar} map={map} database={database} onStatus={onStatus} onRetryChange={onRetryChange} />;
 }
 
 function SelectedMapWorkspace({ sidebar, map, database, onStatus, onRetryChange }: Omit<MapWorkspaceProps, 'map'> & { map: StoredMindMap }) {
   const repository = useMemo(() => ({
     update: (input: Parameters<typeof updateMindMapVersioned>[1]) => updateMindMapVersioned(database, input),
-    saveRevision: (input: Parameters<typeof createRevisionAndSaveMap>[1]) => createRevisionAndSaveMap(database, input)
+    saveRevision: (input: Parameters<typeof createRevisionAndSaveMap>[1]) => createRevisionAndSaveMap(database, input),
+    retryRevisionPrune: (mapId: string) => retryRevisionPrune(database, mapId)
   }), [database]);
   const queue = useSaveQueue(map, repository);
   const [revisions, setRevisions] = useState<StoredRevision[]>([]);

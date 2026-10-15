@@ -45,15 +45,27 @@ describe('revision Rules', () => {
     await assertFails(updateDoc(doc(database, 'mindMaps/map-1/revisions/revision-1'), { title: 'Mutated' }));
   });
 
-  it('rejects revision Markdown exceeding the 256 KiB UTF-8 cap', async () => {
+  it('accepts exactly 262144 UTF-8 Markdown bytes and rejects every byte above the cap', async () => {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const database = context.firestore();
       await setDoc(doc(database, `authorizedUsers/${ownerUid}`), { enabled: true, grantedAt: new Date(), grantedBy: 'operator' });
       await setDoc(doc(database, 'mindMaps/map-1'), mapData());
     });
     const database = testEnv.authenticatedContext(ownerUid).firestore();
+    const sizes = [
+      ['ascii-equal', 'a'.repeat(262144), true],
+      ['ascii-above', 'a'.repeat(262145), false],
+      ['unicode-equal', '😀'.repeat(65536), true],
+      ['unicode-above', '😀'.repeat(65536) + 'a', false]
+    ] as const;
 
-    await assertSucceeds(setDoc(doc(database, 'mindMaps/map-1/revisions/valid'), revisionData()));
-    await assertFails(setDoc(doc(database, 'mindMaps/map-1/revisions/oversized'), revisionData({ markdown: 'a'.repeat(262_145) })));
+    for (const [id, markdown, allowed] of sizes) {
+      const write = setDoc(doc(database, 'mindMaps/map-1/revisions', id), revisionData({ markdown }));
+      if (allowed) {
+        await assertSucceeds(write);
+      } else {
+        await assertFails(write);
+      }
+    }
   });
 });

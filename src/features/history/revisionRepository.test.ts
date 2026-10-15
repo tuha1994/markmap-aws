@@ -73,4 +73,28 @@ describe('createRevisionAndSaveMap', () => {
     }));
     expect(firestore.updateDoc).not.toHaveBeenCalled();
   });
+
+  it('returns the transaction-confirmed remote map on a content-version conflict', async () => {
+    const database = {} as never;
+    const mapReference = { id: 'map-1' };
+    const remoteDocument = {
+      ownerUid: 'owner-uid', contentVersion: 6, markdown: '# Competing remote', title: 'Remote title'
+    };
+    const transaction = {
+      get: vi.fn().mockResolvedValue({ id: 'map-1', exists: () => true, data: () => remoteDocument }),
+      update: vi.fn(),
+      set: vi.fn()
+    };
+
+    firestore.doc.mockReturnValue(mapReference);
+    firestore.collection.mockReturnValue({ id: 'revisions' });
+    firestore.runTransaction.mockImplementation(async (_db: unknown, action: (value: typeof transaction) => Promise<void>) => action(transaction));
+
+    await expect(createRevisionAndSaveMap(database, {
+      ownerUid: 'owner-uid', mapId: 'map-1', expectedContentVersion: 4, title: 'Local title', folderId: null,
+      markdown: '# Local draft', contentSearchText: 'local draft', reason: 'manual'
+    })).resolves.toEqual({ status: 'conflict', remote: { id: 'map-1', ...remoteDocument } });
+    expect(transaction.update).not.toHaveBeenCalled();
+    expect(transaction.set).not.toHaveBeenCalled();
+  });
 });

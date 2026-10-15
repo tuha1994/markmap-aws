@@ -206,6 +206,27 @@ describe('PrivateWorkspace', () => {
     }));
   });
 
+  it('clears old revision actions immediately when switching maps while new history loads', async () => {
+    mapList.current = {
+      maps: [
+        { ...makeMindMap({ title: 'Architecture' }), id: 'map-1' },
+        { ...makeMindMap({ title: 'Product' }), id: 'map-2' }
+      ],
+      loading: false,
+      error: null
+    };
+    mockedListRevisions
+      .mockResolvedValueOnce([{ id: 'revision-1', ownerUid: 'owner-uid', mapId: 'map-1', sourceContentVersion: 1, title: 'Architecture revision', folderId: null, markdown: '# Old', reason: 'manual', createdAt: new Date(), createdByUid: 'owner-uid' }] as never)
+      .mockReturnValueOnce(new Promise(() => {}));
+    render(<PrivateWorkspace />);
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Restore Architecture revision' })).toHaveLength(2));
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Workspace navigation' })).getByRole('button', { name: 'Product' }));
+
+    expect(screen.queryAllByRole('button', { name: 'Restore Architecture revision' })).toHaveLength(0);
+    expect(screen.getAllByText('No saved revisions yet.')).toHaveLength(2);
+  });
+
   it('exposes Retry for a failed save and invokes the queue retry path', async () => {
     vi.useFakeTimers();
     mockedCreateRevisionAndSaveMap

@@ -18,7 +18,7 @@ import type { Revision, RevisionReason } from './revisionTypes';
 export type SaveResult =
   | { status: 'saved'; revisionId: string | null; prunePending: boolean }
   | { status: 'prune-pending' }
-  | { status: 'conflict' }
+  | { status: 'conflict'; remote: StoredMindMap }
   | { status: 'error'; error: Error };
 
 export type CreateRevisionAndSaveMapInput = {
@@ -112,7 +112,7 @@ export async function createRevisionAndSaveMap(
 
       const map = mapSnapshot.data();
       if (map.contentVersion !== input.expectedContentVersion) {
-        throw new RevisionConflictError();
+        throw new RevisionConflictError({ ...(map as StoredMindMap), id: mapSnapshot.id });
       }
       const nextContentVersion = input.expectedContentVersion + 1;
       const timestamp = serverTimestamp();
@@ -158,8 +158,8 @@ export async function createRevisionAndSaveMap(
       });
     });
   } catch (error) {
-    if (error instanceof RevisionConflictError) {
-      return { status: 'conflict' };
+    if (error instanceof RevisionConflictError && error.remote) {
+      return { status: 'conflict', remote: error.remote };
     }
 
     return { status: 'error', error: toError(error) };
@@ -176,20 +176,28 @@ export async function createRevisionAndSaveMap(
   return { status: 'saved', revisionId: revisionReference.id, prunePending };
 }
 
+export async function retryRevisionPrune(database: Firestore, mapId: string): Promise<boolean> {
+  const mapReference = doc(database, 'mindMaps', mapId);
+  return pruneOldestExcessRevision(database, mapReference, collection(mapReference, 'revisions'), true);
+}
+
 async function pruneOldestExcessRevision(
   database: Firestore,
   mapReference: ReturnType<typeof doc>,
-  revisionsReference: ReturnType<typeof collection>
+  revisionsReference: ReturnType<typeof collection>,
+  clearPendingWhenAtCap = false
 ): Promise<boolean> {
   try {
-    const revisions = await getDocs(query(revisionsReference, orderBy('createdAt', 'asc'), limit(51)));
-    if (revisions.docs.length <= 50) {
-      return false;
+    for (;;) {
+      const revisions = await getDocs(query(revisionsReference, orderBy('createdAt', 'asc'), limit(51)));
+      if (revisions.docs.length <= 50) {
+        if (clearPendingWhenAtCap) {
+          await updateDoc(mapReference, { revisionPrunePending: false });
+        }
+        return false;
+      }
+      await deleteDoc(revisions.docs[0].ref);
     }
-
-    await deleteDoc(revisions.docs[0].ref);
-    await updateDoc(mapReference, { revisionPrunePending: false });
-    return false;
   } catch {
     try {
       await updateDoc(mapReference, { revisionPrunePending: true });
@@ -207,7 +215,11 @@ function isRecentSnapshot(createdAt: unknown): boolean {
     && Date.now() - (createdAt as { toMillis: () => number }).toMillis() < 30_000;
 }
 
-class RevisionConflictError extends Error {}
+class RevisionConflictError extends Error {
+  constructor(readonly remote?: StoredMindMap) {
+    super();
+  }
+}
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error('The map could not be saved.');

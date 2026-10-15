@@ -40,24 +40,23 @@ describe('useSaveQueue', () => {
     expect(screen.getByTestId('status')).toHaveTextContent('prunePending');
   });
 
-  it('retries pending history cleanup with a manual protected save', async () => {
-    vi.useFakeTimers();
-    const saveRevision = vi.fn()
-      .mockResolvedValueOnce({ status: 'prune-pending' })
-      .mockResolvedValueOnce({ status: 'saved', revisionId: 'revision-2', prunePending: false });
-    const repository = { update: vi.fn(), saveRevision } as SaveRepository & { saveRevision: typeof saveRevision };
-    render(<SaveQueueHarness repository={repository} />);
-
-    screen.getByRole('button', { name: 'First' }).click();
-    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
-    expect(screen.getByTestId('status')).toHaveTextContent('prunePending');
+  it('retries pending history cleanup without saving another revision', async () => {
+    const saveRevision = vi.fn();
+    const retryRevisionPrune = vi.fn().mockResolvedValue(false);
+    const repository = { update: vi.fn(), saveRevision, retryRevisionPrune } as SaveRepository & {
+      saveRevision: typeof saveRevision;
+      retryRevisionPrune: typeof retryRevisionPrune;
+    };
+    render(<SaveQueueHarness repository={repository} map={{ id: 'map-1', ...makeMindMap({ revisionPrunePending: true }) }} />);
 
     await act(async () => {
       screen.getByRole('button', { name: 'Retry' }).click();
       await Promise.resolve();
     });
-    expect(saveRevision).toHaveBeenLastCalledWith(expect.objectContaining({ reason: 'manual' }));
-    vi.useRealTimers();
+
+    expect(retryRevisionPrune).toHaveBeenCalledWith('map-1');
+    expect(saveRevision).not.toHaveBeenCalled();
+    expect(screen.getByTestId('status')).toHaveTextContent('saved');
   });
 
   it('uses a manual immutable revision when Save version is requested', async () => {
@@ -216,15 +215,14 @@ describe('useSaveQueue', () => {
     expect(screen.getByTestId('conflict')).toHaveTextContent('first draft|# Remote');
   });
 
-  it('uses the transaction-confirmed remote map when a listener is stale', async () => {
+  it('opens the conflict state from a competing revision-save transaction using its confirmed remote map', async () => {
     vi.useFakeTimers();
     const staleMap = { id: 'map-1', ...makeMindMap({ markdown: '# Stale listener', contentVersion: 1 }) };
     const confirmedRemote = { id: 'map-1', ...makeMindMap({ markdown: '# Confirmed remote', contentVersion: 8 }) };
-    const repository: SaveRepository = {
-      update: vi.fn()
-        .mockResolvedValueOnce({ status: 'conflict', remote: confirmedRemote })
-        .mockResolvedValueOnce({ status: 'updated', contentVersion: 9 })
-    };
+    const saveRevision = vi.fn()
+      .mockResolvedValueOnce({ status: 'conflict', remote: confirmedRemote })
+      .mockResolvedValueOnce({ status: 'saved', revisionId: 'revision-2', prunePending: false });
+    const repository: SaveRepository = { update: vi.fn(), saveRevision };
     render(<SaveQueueHarness repository={repository} map={staleMap} />);
 
     screen.getByRole('button', { name: 'First' }).click();
@@ -240,7 +238,7 @@ describe('useSaveQueue', () => {
       screen.getByRole('button', { name: 'Keep mine' }).click();
       await Promise.resolve();
     });
-    expect(repository.update).toHaveBeenLastCalledWith(expect.objectContaining({
+    expect(saveRevision).toHaveBeenLastCalledWith(expect.objectContaining({
       markdown: 'first draft',
       expectedContentVersion: 8
     }));

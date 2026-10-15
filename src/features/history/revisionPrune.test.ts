@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const firestore = vi.hoisted(() => ({
   collection: vi.fn(),
@@ -15,9 +15,52 @@ const firestore = vi.hoisted(() => ({
 
 vi.mock('firebase/firestore', () => firestore);
 
-import { createRevisionAndSaveMap } from './revisionRepository';
+afterEach(() => vi.clearAllMocks());
+
+import { createRevisionAndSaveMap, retryRevisionPrune } from './revisionRepository';
 
 describe('revision prune failure', () => {
+  it('retries pending cleanup without creating a revision and restores the hard cap of 50', async () => {
+    const database = {} as never;
+    const mapReference = { id: 'map-1' };
+    const oldestRevision = { id: 'revision-1' };
+
+    firestore.doc.mockReturnValue(mapReference);
+    firestore.collection.mockReturnValue({ id: 'revisions' });
+    firestore.query.mockReturnValue({ id: 'prune-query' });
+    firestore.getDocs
+      .mockResolvedValueOnce({ docs: Array.from({ length: 51 }, (_, index) => ({ ref: index === 0 ? oldestRevision : { id: `revision-${index + 1}` } })) })
+      .mockResolvedValueOnce({ docs: Array.from({ length: 50 }, (_, index) => ({ ref: { id: `revision-${index + 2}` } })) });
+    firestore.deleteDoc.mockResolvedValue(undefined);
+    firestore.updateDoc.mockResolvedValue(undefined);
+
+    await expect(retryRevisionPrune(database, 'map-1')).resolves.toBe(false);
+
+    expect(firestore.runTransaction).not.toHaveBeenCalled();
+    expect(firestore.deleteDoc).toHaveBeenCalledTimes(1);
+    expect(firestore.deleteDoc).toHaveBeenCalledWith(oldestRevision);
+    expect(firestore.updateDoc).toHaveBeenCalledWith(mapReference, { revisionPrunePending: false });
+  });
+
+  it('retains pending cleanup when retry deletion fails without creating a revision', async () => {
+    const database = {} as never;
+    const mapReference = { id: 'map-1' };
+    const oldestRevision = { id: 'revision-1' };
+
+    firestore.doc.mockReturnValue(mapReference);
+    firestore.collection.mockReturnValue({ id: 'revisions' });
+    firestore.query.mockReturnValue({ id: 'prune-query' });
+    firestore.getDocs.mockResolvedValue({ docs: Array.from({ length: 51 }, (_, index) => ({ ref: index === 0 ? oldestRevision : { id: `revision-${index + 1}` } })) });
+    firestore.deleteDoc.mockRejectedValue(new Error('delete denied'));
+    firestore.updateDoc.mockResolvedValue(undefined);
+
+    await expect(retryRevisionPrune(database, 'map-1')).resolves.toBe(true);
+
+    expect(firestore.runTransaction).not.toHaveBeenCalled();
+    expect(firestore.deleteDoc).toHaveBeenCalledWith(oldestRevision);
+    expect(firestore.updateDoc).toHaveBeenCalledWith(mapReference, { revisionPrunePending: true });
+  });
+
   it('keeps all revisions and marks prune pending if oldest-revision deletion fails', async () => {
     const database = {} as never;
     const mapReference = { id: 'map-1' };
