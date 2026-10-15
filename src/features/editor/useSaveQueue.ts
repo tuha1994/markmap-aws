@@ -44,7 +44,13 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository): Sa
   const confirmedMarkdown = useRef(map.markdown);
   const confirmedVersion = useRef(map.contentVersion);
   const activeMapId = useRef(map.id);
+  const mapSession = useRef(0);
+  const renderedMapId = useRef(map.id);
   const mapRef = useRef(map);
+  if (map.id !== renderedMapId.current) {
+    renderedMapId.current = map.id;
+    mapSession.current += 1;
+  }
   mapRef.current = map;
 
   const clearTimer = useCallback(() => {
@@ -54,9 +60,9 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository): Sa
     }
   }, []);
 
-  const save = useCallback(() => {
+  const save = useCallback((requestedMapSession = mapSession.current) => {
     clearTimer();
-    if (inFlight.current || conflictRef.current !== null) {
+    if (requestedMapSession !== mapSession.current || inFlight.current || conflictRef.current !== null) {
       return;
     }
     if (draftRef.current === confirmedMarkdown.current) {
@@ -67,6 +73,7 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository): Sa
     const savedGeneration = generation.current;
     const savedMarkdown = draftRef.current;
     const currentMap = mapRef.current;
+    const savedMapSession = mapSession.current;
     inFlight.current = true;
     setStatus('saving');
 
@@ -79,6 +86,9 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository): Sa
       markdown: savedMarkdown,
       contentSearchText: savedMarkdown.toLocaleLowerCase()
     }).then((result) => {
+      if (savedMapSession !== mapSession.current || currentMap.id !== mapRef.current.id) {
+        return;
+      }
       inFlight.current = false;
       if (result.status === 'updated') {
         confirmedVersion.current = result.contentVersion;
@@ -87,15 +97,15 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository): Sa
           setStatus('saved');
         } else {
           setStatus('saving');
-          save();
+          save(savedMapSession);
         }
         return;
       }
       if (result.status === 'conflict') {
         conflictRef.current = {
           localMarkdown: draftRef.current,
-          remoteMarkdown: mapRef.current.markdown,
-          remoteContentVersion: mapRef.current.contentVersion
+          remoteMarkdown: result.remote.markdown,
+          remoteContentVersion: result.remote.contentVersion
         };
         setConflict(conflictRef.current);
         setStatus('conflict');
@@ -103,6 +113,9 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository): Sa
       }
       setStatus(isOffline() ? 'offlinePending' : 'error');
     }, () => {
+      if (savedMapSession !== mapSession.current || currentMap.id !== mapRef.current.id) {
+        return;
+      }
       inFlight.current = false;
       setStatus(isOffline() ? 'offlinePending' : 'error');
     });

@@ -44,6 +44,44 @@ describe('subscribeMindMaps', () => {
 });
 
 describe('updateMindMapVersioned', () => {
+  it('returns the confirmed remote map on a transaction conflict', async () => {
+    const database = {} as never;
+    const mapReference = { id: 'map-1' };
+    const remoteDocument = {
+      ownerUid: 'owner-uid',
+      contentVersion: 6,
+      markdown: '# Confirmed remote',
+      title: 'Remote title'
+    };
+    const transaction = {
+      get: vi.fn().mockResolvedValue({
+        id: 'map-1',
+        exists: () => true,
+        data: () => remoteDocument
+      }),
+      update: vi.fn()
+    };
+
+    firestore.doc.mockReturnValue(mapReference);
+    firestore.runTransaction.mockImplementation(async (_db: unknown, action: (value: typeof transaction) => Promise<void>) => {
+      await action(transaction);
+    });
+
+    await expect(updateMindMapVersioned(database, {
+      ownerUid: 'owner-uid',
+      mapId: 'map-1',
+      expectedContentVersion: 4,
+      title: 'Updated',
+      folderId: null,
+      markdown: 'local draft',
+      contentSearchText: 'local draft'
+    })).resolves.toEqual({
+      status: 'conflict',
+      remote: { id: 'map-1', ...remoteDocument }
+    });
+    expect(transaction.update).not.toHaveBeenCalled();
+  });
+
   it('uses a transaction version check for map updates', async () => {
     const database = {} as never;
     const mapReference = { id: 'map-1' };

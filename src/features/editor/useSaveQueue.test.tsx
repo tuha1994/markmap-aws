@@ -22,8 +22,11 @@ function SaveQueueHarness({ repository, map = { id: 'map-1', ...makeMindMap() } 
       <output data-testid="draft">{queue.draft}</output>
       <output data-testid="status">{queue.status}</output>
       <output data-testid="conflict">{queue.conflict ? `${queue.conflict.localMarkdown}|${queue.conflict.remoteMarkdown}` : ''}</output>
+      <output data-testid="conflict-version">{queue.conflict?.remoteContentVersion ?? ''}</output>
       <button onClick={() => queue.setDraft('first draft')}>First</button>
       <button onClick={() => queue.setDraft('second draft')}>Second</button>
+      <button onClick={() => queue.retry()}>Retry</button>
+      <button onClick={() => queue.resolveConflict('keepMine')}>Keep mine</button>
     </>
   );
 }
@@ -86,6 +89,30 @@ describe('useSaveQueue', () => {
     vi.useRealTimers();
   });
 
+  it('retries a returned repository error', async () => {
+    vi.useFakeTimers();
+    const repository: SaveRepository = {
+      update: vi.fn()
+        .mockResolvedValueOnce({ status: 'error', error: new Error('temporary failure') })
+        .mockResolvedValueOnce({ status: 'updated', contentVersion: 2 })
+    };
+    render(<SaveQueueHarness repository={repository} />);
+
+    screen.getByRole('button', { name: 'First' }).click();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(screen.getByTestId('status')).toHaveTextContent('error');
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Retry' }).click();
+      await Promise.resolve();
+    });
+    expect(repository.update).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId('status')).toHaveTextContent('saved');
+    vi.useRealTimers();
+  });
+
   it('retries an in-memory offline draft after connectivity returns', async () => {
     vi.useFakeTimers();
     const originalOnline = Object.getOwnPropertyDescriptor(navigator, 'onLine');
@@ -144,5 +171,72 @@ describe('useSaveQueue', () => {
 
     expect(screen.getByTestId('status')).toHaveTextContent('conflict');
     expect(screen.getByTestId('conflict')).toHaveTextContent('first draft|# Remote');
+  });
+
+  it('uses the transaction-confirmed remote map when a listener is stale', async () => {
+    vi.useFakeTimers();
+    const staleMap = { id: 'map-1', ...makeMindMap({ markdown: '# Stale listener', contentVersion: 1 }) };
+    const confirmedRemote = { id: 'map-1', ...makeMindMap({ markdown: '# Confirmed remote', contentVersion: 8 }) };
+    const repository: SaveRepository = {
+      update: vi.fn()
+        .mockResolvedValueOnce({ status: 'conflict', remote: confirmedRemote })
+        .mockResolvedValueOnce({ status: 'updated', contentVersion: 9 })
+    };
+    render(<SaveQueueHarness repository={repository} map={staleMap} />);
+
+    screen.getByRole('button', { name: 'First' }).click();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+
+    expect(screen.getByTestId('status')).toHaveTextContent('conflict');
+    expect(screen.getByTestId('conflict')).toHaveTextContent('first draft|# Confirmed remote');
+    expect(screen.getByTestId('conflict-version')).toHaveTextContent('8');
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Keep mine' }).click();
+      await Promise.resolve();
+    });
+    expect(repository.update).toHaveBeenLastCalledWith(expect.objectContaining({
+      markdown: 'first draft',
+      expectedContentVersion: 8
+    }));
+    vi.useRealTimers();
+  });
+
+  it('ignores an old map completion after the selected map changes', async () => {
+    vi.useFakeTimers();
+    const oldMapWrite = deferred<{ status: 'updated'; contentVersion: number }>();
+    const newMapWrite = deferred<{ status: 'updated'; contentVersion: number }>();
+    const repository: SaveRepository = {
+      update: vi.fn().mockReturnValueOnce(oldMapWrite.promise).mockReturnValueOnce(newMapWrite.promise)
+    };
+    const oldMap = { id: 'map-1', ...makeMindMap({ markdown: '# Old', contentVersion: 4 }) };
+    const newMap = { id: 'map-2', ...makeMindMap({ markdown: '# New', contentVersion: 1 }) };
+    const { rerender } = render(<SaveQueueHarness repository={repository} map={oldMap} />);
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'First' }).click();
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(repository.update).toHaveBeenLastCalledWith(expect.objectContaining({ mapId: 'map-1', expectedContentVersion: 4 }));
+
+    rerender(<SaveQueueHarness repository={repository} map={newMap} />);
+    await act(async () => {
+      oldMapWrite.resolve({ status: 'updated', contentVersion: 5 });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('draft')).toHaveTextContent('# New');
+    expect(screen.getByTestId('status')).toHaveTextContent('saved');
+    expect(repository.update).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'First' }).click();
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(repository.update).toHaveBeenLastCalledWith(expect.objectContaining({ mapId: 'map-2', expectedContentVersion: 1 }));
+    newMapWrite.resolve({ status: 'updated', contentVersion: 2 });
+    vi.useRealTimers();
   });
 });

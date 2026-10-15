@@ -19,7 +19,7 @@ export type StoredMindMap = MindMap & { id: string };
 export type RepositoryErrorListener = (error: Error) => void;
 export type UpdateResult =
   | { status: 'updated'; contentVersion: number }
-  | { status: 'conflict' }
+  | { status: 'conflict'; remote: StoredMindMap }
   | { status: 'error'; error: Error };
 
 export type UpdateMindMapInput = {
@@ -129,7 +129,7 @@ export async function updateMindMapVersioned(
         throw new Error('The mind map is unavailable.');
       }
       if (existing.data().contentVersion !== input.expectedContentVersion) {
-        throw new VersionConflictError();
+        throw new VersionConflictError(toMindMap(existing.id, existing.data()));
       }
 
       transaction.update(mapReference, {
@@ -144,7 +144,7 @@ export async function updateMindMapVersioned(
     });
   } catch (error) {
     if (error instanceof VersionConflictError) {
-      return { status: 'conflict' };
+      return { status: 'conflict', remote: error.remote };
     }
     return { status: 'error', error: toError(error) };
   }
@@ -152,7 +152,11 @@ export async function updateMindMapVersioned(
   return { status: 'updated', contentVersion: input.expectedContentVersion + 1 };
 }
 
-class VersionConflictError extends Error {}
+class VersionConflictError extends Error {
+  constructor(readonly remote: StoredMindMap) {
+    super();
+  }
+}
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error('The mind map operation failed.');
