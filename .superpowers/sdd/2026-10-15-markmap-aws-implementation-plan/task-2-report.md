@@ -44,3 +44,13 @@ Each behavior was introduced test-first and observed failing before its implemen
 ## Configuration blockers
 
 Actual-project Firebase popup/authorized-domain validation remains blocked because no Firebase project ID/config values, Google-provider enablement confirmation, authorized-domain confirmation for `tuha1994.github.io`, or real intended-user UID were supplied. A privileged operator must create or enable `authorizedUsers/{uid}` outside this browser application before real access validation.
+
+## Review-fix evidence
+
+- Added focused, composed `AuthGate` → `AccessGate` transition tests and observed all three fail before production changes: allowed → signed-out and allowed → Auth-observer error each showed zero cleanup calls; UID A → UID B rendered B's private child while B authorization was unresolved.
+- `AuthGate` now invokes the supplied private-state cleanup boundary after a signed-in session transitions to signed-out or error, so cleanup does not depend on `AccessGate` remaining mounted after private UI is removed.
+- `AccessGate` now tags access state with the authorized UID. A changed UID cannot render previously allowed private children; it synchronously renders the access-check state, invokes cleanup, then requests the new UID's own record.
+- Cleanup is a boundary currently invoked and tested. Actual workspace subscription cleanup is deferred because workspace repositories do not exist yet.
+- Focused regression run passed: `npm test -- src/app/App.test.tsx src/features/auth src/features/access` — 6 files, 10 tests.
+- Full verification passed: `npm test` — 9 files, 17 tests; `npm run lint`; `npm run typecheck`; `npm run build`; and `git diff --check 580f008..HEAD && git diff --check`.
+- `npm audit` has 4 high transitive `grpc-js` advisories not present in the browser bundle; reassess on Firebase update or if server-side use is introduced. No Firebase downgrade or override was made.

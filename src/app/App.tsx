@@ -9,7 +9,7 @@ function clearPrivateState() {
 export function App() {
   return (
     <AuthProvider>
-      <AuthGate>
+      <AuthGate onPrivateStateClear={clearPrivateState}>
         <AccessGate onPrivateStateClear={clearPrivateState}>
           <main aria-label="Markmap AWS workspace" />
         </AccessGate>

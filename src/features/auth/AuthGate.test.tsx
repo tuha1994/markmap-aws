@@ -21,7 +21,7 @@ describe('AuthGate', () => {
     });
 
     render(
-      <AuthGate>
+      <AuthGate onPrivateStateClear={vi.fn()}>
         <p>Private workspace</p>
       </AuthGate>
     );

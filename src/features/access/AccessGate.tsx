@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
 import { getOwnAuthorization } from './accessRepository';
@@ -13,34 +13,45 @@ export function AccessGate({
   onPrivateStateClear(): void;
 }) {
   const { phase: authPhase, signOut, user } = useAuth();
-  const [accessPhase, setAccessPhase] = useState<AccessPhase>('checking');
+  const uid = user?.uid ?? null;
+  const [access, setAccess] = useState<{ phase: AccessPhase; uid: string | null }>({
+    phase: 'checking',
+    uid: null
+  });
   const [retryVersion, setRetryVersion] = useState(0);
+  const previousUid = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
 
-    if (authPhase !== 'signedIn' || !user) {
+    if (authPhase !== 'signedIn' || !uid) {
       onPrivateStateClear();
-      setAccessPhase('checking');
+      previousUid.current = null;
+      setAccess({ phase: 'checking', uid: null });
       return () => {
         active = false;
       };
     }
 
-    setAccessPhase('checking');
-    void getOwnAuthorization(user.uid)
+    if (previousUid.current && previousUid.current !== uid) {
+      onPrivateStateClear();
+    }
+    previousUid.current = uid;
+    setAccess({ phase: 'checking', uid });
+
+    void getOwnAuthorization(uid)
       .then((authorization) => {
         if (!active) {
           return;
         }
 
         if (authorization?.enabled) {
-          setAccessPhase('allowed');
+          setAccess({ phase: 'allowed', uid });
           return;
         }
 
         onPrivateStateClear();
-        setAccessPhase('denied');
+        setAccess({ phase: 'denied', uid });
       })
       .catch(() => {
         if (!active) {
@@ -48,30 +59,30 @@ export function AccessGate({
         }
 
         onPrivateStateClear();
-        setAccessPhase('error');
+        setAccess({ phase: 'error', uid });
       });
 
     return () => {
       active = false;
     };
-  }, [authPhase, onPrivateStateClear, retryVersion, user]);
+  }, [authPhase, onPrivateStateClear, retryVersion, uid]);
 
-  if (authPhase !== 'signedIn' || !user) {
+  if (authPhase !== 'signedIn' || !uid) {
     return null;
   }
 
-  if (accessPhase === 'checking') {
+  if (access.uid !== uid || access.phase === 'checking') {
     return <main aria-label="Access loading">Checking access…</main>;
   }
 
-  if (accessPhase === 'allowed') {
+  if (access.phase === 'allowed') {
     return <>{children}</>;
   }
 
   return (
     <main aria-label="Access denied">
       <p role="alert">
-        {accessPhase === 'denied'
+        {access.phase === 'denied'
           ? 'This account has not been granted access.'
           : 'Access could not be verified. Please retry.'}
       </p>
