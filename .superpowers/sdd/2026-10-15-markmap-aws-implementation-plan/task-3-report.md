@@ -47,3 +47,37 @@
 - No task blocker remains.
 - The host runs Node `v26.7.0`; `superstatic@10.0.0` warns it supports Node 20/22/24. Local Firestore Emulator tests nevertheless started and passed.
 - `npm ci` reports 12 dependency-audit findings (4 moderate, 8 high) in the installed dependency graph; no forced upgrade/downgrade was applied because it would exceed this scoped task.
+
+## Review follow-up — 2026-10-15
+
+### Delivered
+
+- `validMapUpdate()` now invokes `validFolderReference(request.resource.data.folderId)` on every map update, including updates that retain their existing folder ID.
+- Added a direct client-SDK Emulator regression: an owner creates an active folder/map, archives the folder, then attempts a title/content-version update retaining that folder ID; the write is denied.
+- Guarded Rules-test `afterAll` cleanup in both harness files so initialization failures report only the expected missing-Emulator error, not a secondary `testEnv.cleanup()` TypeError.
+
+### TDD evidence
+
+- RED: the new direct-SDK regression failed against the prior Rules behavior with `Expected request to fail, but it succeeded.`
+- GREEN: after the one-line Rules change, the focused Emulator test passed.
+- Missing-Emulator verification intentionally still fails at initialization with `The host and port of the firestore emulator must be specified`; cleanup no longer adds a `TypeError`.
+
+### Verification
+
+- Local Firestore Emulator only (no deploy): focused owner Rules test passed, 1 file / 7 tests; full Rules suite passed, 2 files / 10 tests.
+- `npm test` — passed: 10 files, 18 tests.
+- `npm run lint` — passed.
+- `npm run typecheck` — passed.
+- `npm run build` — passed; existing >500 kB chunk advisory emitted.
+- `git diff --check` — passed before this report append; rechecked before commit.
+
+### Files changed
+
+- `firestore.rules`
+- `src/test/rules/ownerData.rules.test.ts`
+- `src/test/rules/authorizedUsers.rules.test.ts`
+- `.superpowers/sdd/2026-10-15-markmap-aws-implementation-plan/task-3-report.md`
+
+### Blockers
+
+- None.

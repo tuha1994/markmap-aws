@@ -48,7 +48,9 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  await testEnv.cleanup();
+  if (testEnv) {
+    await testEnv.cleanup();
+  }
 });
 
 describe('authorizedUsers Firestore Rules', () => {

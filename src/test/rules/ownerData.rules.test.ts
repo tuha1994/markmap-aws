@@ -103,7 +103,9 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  await testEnv.cleanup();
+  if (testEnv) {
+    await testEnv.cleanup();
+  }
 });
 
 describe('owner-scoped Firestore Rules', () => {
@@ -188,6 +190,28 @@ describe('owner-scoped Firestore Rules', () => {
       updatedAt: serverTimestamp()
     }));
     await assertFails(getDoc(mapRef));
+  });
+
+  it('denies map updates that retain a folder reference after the owner archives the folder', async () => {
+    await seedApproved(ownerUid);
+    const db = testEnv.authenticatedContext(ownerUid).firestore();
+    const folderRef = doc(db, 'folders', 'folder-1');
+    const mapRef = doc(db, 'mindMaps', 'map-1');
+
+    await assertSucceeds(setDoc(folderRef, folderData(ownerUid)));
+    await assertSucceeds(setDoc(mapRef, mapData(ownerUid, { folderId: 'folder-1' })));
+    await assertSucceeds(updateDoc(folderRef, {
+      archivedAt: serverTimestamp(),
+      archivedByUid: ownerUid,
+      updatedAt: serverTimestamp()
+    }));
+
+    await assertFails(updateDoc(mapRef, {
+      title: 'Archived folder map',
+      titleLower: 'archived folder map',
+      contentVersion: 2,
+      updatedAt: serverTimestamp()
+    }));
   });
 
   it('permits valid owner-constrained map and folder access', async () => {

@@ -182,10 +182,7 @@ service cloud.firestore {
         && request.resource.data.createdAt == resource.data.createdAt
         && validMapVersionTransition()
         && validMapDeleteTransition()
-        && (
-          request.resource.data.folderId == resource.data.folderId
-          || validFolderReference(request.resource.data.folderId)
-        );
+        && validFolderReference(request.resource.data.folderId);
     }
 
     function validRevisionKeys(data) {
