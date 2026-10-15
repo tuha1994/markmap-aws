@@ -1,5 +1,8 @@
 export function firestoreEmulatorEndpoint(): { host: string; port: number } {
-  const configured = process.env.FIRESTORE_EMULATOR_HOST ?? '127.0.0.1:8090';
+  const configured = process.env.FIRESTORE_EMULATOR_HOST;
+  if (configured === undefined) {
+    throw new Error('FIRESTORE_EMULATOR_HOST must be set by the Rules test runner.');
+  }
   const separator = configured.lastIndexOf(':');
 
   if (separator === -1) {

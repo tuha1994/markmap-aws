@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "test": "vitest run",
-    "test:rules": "firebase emulators:exec --only firestore --project markmap-aws-rules \"vitest run --config vitest.rules.config.ts\"",
+    "test:rules": "node scripts/run-rules-tests.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "ci:install": "npm ci"

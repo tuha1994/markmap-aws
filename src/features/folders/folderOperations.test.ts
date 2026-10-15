@@ -70,4 +70,30 @@ describe('moveMapsAndArchiveFolder', () => {
     expect(firstBatch.update).not.toHaveBeenCalledWith(sourceFolder, expect.anything());
     expect(secondBatch.commit).toHaveBeenCalledOnce();
   });
+
+  it('returns an archive-pending partial result after all map relocation chunks commit but folder archival fails', async () => {
+    const database = {} as never;
+    const sourceFolder = { id: 'folder-1' };
+    const relocationBatch = { update: vi.fn(), commit: vi.fn().mockResolvedValue(undefined) };
+    const archiveBatch = { update: vi.fn(), commit: vi.fn().mockRejectedValue(new Error('archive failed')) };
+    const mapReference = { id: 'map-1' };
+
+    firestore.doc.mockReturnValue(sourceFolder);
+    firestore.collection.mockReturnValue({ id: 'maps' });
+    firestore.query.mockReturnValue({ id: 'maps-query' });
+    firestore.getDoc.mockResolvedValue({ exists: () => true, data: () => ({ ownerUid: 'owner-uid', archivedAt: null }) });
+    firestore.getDocs.mockResolvedValue({ docs: [{
+      ref: mapReference, data: () => ({ ownerUid: 'owner-uid', deletedAt: null, contentVersion: 1 })
+    }] });
+    firestore.writeBatch.mockReturnValueOnce(relocationBatch).mockReturnValueOnce(archiveBatch);
+    firestore.serverTimestamp.mockReturnValue('server-time');
+
+    await expect(moveMapsAndArchiveFolder(database, {
+      ownerUid: 'owner-uid', folderId: 'folder-1', destinationFolderId: null
+    })).resolves.toEqual({ status: 'partial', mapsMoved: 1, archivePending: true, retryable: true });
+
+    expect(relocationBatch.update).toHaveBeenCalledWith(mapReference, expect.objectContaining({ folderId: null }));
+    expect(archiveBatch.update).toHaveBeenCalledWith(sourceFolder, expect.objectContaining({ archivedByUid: 'owner-uid' }));
+    expect(archiveBatch.commit).toHaveBeenCalledOnce();
+  });
 });

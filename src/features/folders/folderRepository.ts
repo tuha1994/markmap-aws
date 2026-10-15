@@ -90,7 +90,8 @@ export type MoveMapsAndArchiveFolderInput = {
 export type FolderOperationResult =
   | { status: 'archived' }
   | { status: 'renamed' }
-  | { status: 'partial'; mapsMoved: number; retryable: true }
+  | { status: 'partial'; mapsMoved: number; retryable: true; archivePending?: never }
+  | { status: 'partial'; mapsMoved: number; retryable: true; archivePending: true }
   | { status: 'error'; error: Error; retryable?: true };
 
 const MAX_MAP_RELOCATION_WRITES = 400;
@@ -162,7 +163,11 @@ export async function moveMapsAndArchiveFolder(
       archivedByUid: input.ownerUid,
       updatedAt: timestamp
     });
-    await archiveBatch.commit();
+    try {
+      await archiveBatch.commit();
+    } catch {
+      return { status: 'partial', mapsMoved, archivePending: true, retryable: true };
+    }
   } catch (error) {
     return { status: 'error', error: toError(error) };
   }

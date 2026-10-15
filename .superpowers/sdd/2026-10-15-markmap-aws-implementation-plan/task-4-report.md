@@ -29,7 +29,7 @@ Observed expected RED failures before implementations for:
 
 ## Environment note
 
-`npm run test:rules` now starts its own Firestore Emulator through `firebase emulators:exec`, using the project-local configured port `8090` and test initialization that parses `FIRESTORE_EMULATOR_HOST` (with the same `127.0.0.1:8090` fallback). It no longer depends on a pre-existing emulator at port 8085.
+`npm run test:rules` now starts its own Firestore Emulator through a project runner that reserves ephemeral loopback ports, writes a temporary Firebase CLI config, and removes that config after the Rules suite exits. It no longer depends on a pre-existing emulator or a fixed port.
 
 ## Review-fix evidence
 
@@ -49,3 +49,9 @@ Observed expected RED failures before implementations for:
 - `npm run typecheck` — passed.
 - `npm run build` — passed (existing Vite chunk-size advisory only).
 - `git diff --check` — passed.
+
+## Task 4 re-review fix
+
+- **Strict RED → GREEN:** added the archive-commit failure regression before implementation. RED returned generic `{ status: 'error' }`; GREEN returns the typed retryable result `{ status: 'partial', mapsMoved: 1, archivePending: true, retryable: true }` after all relocation chunks have committed.
+- **Self-contained Rules command:** verified port 8090 was occupied without terminating its owner, then replaced the fixed-port setup with a runner that reserves ephemeral loopback Firestore and hub ports, writes a temporary Firebase CLI config, and removes it after execution. `npm run test:rules` starts and stops its own emulator successfully.
+- **Verification:** `npm test` — 16 files / 29 tests passed; `npm run test:rules` — 3 files / 12 tests passed; lint, typecheck, build, and `git diff --check` passed. Build retains the existing Vite chunk-size advisory.

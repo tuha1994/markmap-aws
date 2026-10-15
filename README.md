@@ -19,10 +19,10 @@ Do not commit secrets, service-account keys, AWS credentials, Firebase emulator 
 
 ## Firestore Emulator Rules tests
 
-Rules tests run only against the local Firestore Emulator and never deploy Rules or contact a Firebase project:
+Rules tests run only against a dynamically configured local Firestore Emulator and never deploy Rules or contact a Firebase project:
 
 ```bash
-npx firebase emulators:exec --only firestore "npm run test:rules"
+npm run test:rules
 ```
 
 ## Privileged first UID grant runbook
