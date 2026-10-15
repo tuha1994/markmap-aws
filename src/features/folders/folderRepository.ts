@@ -100,6 +100,10 @@ export async function moveMapsAndArchiveFolder(
   database: Firestore,
   input: MoveMapsAndArchiveFolderInput
 ): Promise<FolderOperationResult> {
+  if (input.destinationFolderId === input.folderId) {
+    return { status: 'error', error: new Error('A folder cannot be its own destination.') };
+  }
+
   const sourceFolder = doc(database, 'folders', input.folderId);
   const destinationFolder = input.destinationFolderId === null
     ? null

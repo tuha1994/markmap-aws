@@ -9,6 +9,18 @@ vi.mock('firebase/firestore', () => firestore);
 import { moveMapsAndArchiveFolder } from './folderRepository';
 
 describe('moveMapsAndArchiveFolder destination validation', () => {
+  it('rejects the source folder as its own destination before any write or archive', async () => {
+    firestore.doc.mockReturnValue({ id: 'source' });
+
+    await expect(moveMapsAndArchiveFolder({} as never, {
+      ownerUid: 'owner-uid', folderId: 'source', destinationFolderId: 'source'
+    })).resolves.toMatchObject({ status: 'error' });
+
+    expect(firestore.getDoc).not.toHaveBeenCalled();
+    expect(firestore.getDocs).not.toHaveBeenCalled();
+    expect(firestore.writeBatch).not.toHaveBeenCalled();
+  });
+
   it('rejects an archived or other-owner destination folder before any write', async () => {
     const source = { id: 'source' };
     const destination = { id: 'destination' };

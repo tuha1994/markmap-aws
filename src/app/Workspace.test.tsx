@@ -1,7 +1,8 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { makeMindMap } from '../test/factories';
+import { makeFolder, makeMindMap } from '../test/factories';
+import { moveMapsAndArchiveFolder, subscribeFolders } from '../features/folders/folderRepository';
 import { archiveMindMap, createMindMap, updateMindMapVersioned } from '../features/mindmaps/mindMapRepository';
 import { PrivateWorkspace } from './App';
 
@@ -17,6 +18,14 @@ vi.mock('../features/mindmaps/useMindMapList', () => ({
 vi.mock('../lib/firebase/client', () => ({
   getFirebaseClient: () => ({ firestore: {} })
 }));
+vi.mock('../features/folders/folderRepository', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../features/folders/folderRepository')>();
+  return {
+    ...actual,
+    subscribeFolders: vi.fn(),
+    moveMapsAndArchiveFolder: vi.fn()
+  };
+});
 vi.mock('../features/mindmaps/mindMapRepository', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../features/mindmaps/mindMapRepository')>();
   return {
@@ -33,6 +42,8 @@ vi.mock('../features/preview/MarkmapPreview', () => ({
 const mockedCreateMindMap = vi.mocked(createMindMap);
 const mockedArchiveMindMap = vi.mocked(archiveMindMap);
 const mockedUpdateMindMapVersioned = vi.mocked(updateMindMapVersioned);
+const mockedSubscribeFolders = vi.mocked(subscribeFolders);
+const mockedMoveMapsAndArchiveFolder = vi.mocked(moveMapsAndArchiveFolder);
 
 function signedIn() {
   return { phase: 'signedIn' as const, user: { uid: 'owner-uid' }, signOut: vi.fn(), signIn: vi.fn() };
@@ -47,6 +58,11 @@ describe('PrivateWorkspace', () => {
     mockedCreateMindMap.mockResolvedValue(map as never);
     mockedArchiveMindMap.mockResolvedValue({ status: 'updated', contentVersion: 0 });
     mockedUpdateMindMapVersioned.mockResolvedValue({ status: 'updated', contentVersion: 2 });
+    mockedSubscribeFolders.mockImplementation((_database, _ownerUid, listener) => {
+      listener([{ ...makeFolder({ name: 'Planning' }), id: 'folder-1' }]);
+      return vi.fn();
+    });
+    mockedMoveMapsAndArchiveFolder.mockResolvedValue({ status: 'archived' });
   });
 
   it('lets an approved user create, select, rename, and archive an owned map', () => {
@@ -71,22 +87,26 @@ describe('PrivateWorkspace', () => {
 
   it('shows loading and save error states without rendering private map payloads', () => {
     mapList.current = {
-      maps: [{ ...makeMindMap({ title: 'Private title' }), id: 'map-1' }],
+      maps: [{ ...makeMindMap({ title: 'Private title', markdown: '# Private content' }), id: 'map-1' }],
       loading: true,
       error: null
     };
     const view = render(<PrivateWorkspace />);
     expect(screen.getByRole('status')).toHaveTextContent('Loading maps…');
     expect(screen.queryByText('Private title')).not.toBeInTheDocument();
+    expect(screen.queryByText('# Private content')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Search private maps' })).not.toBeInTheDocument();
 
     mapList.current = {
-      maps: [{ ...makeMindMap({ title: 'Private title' }), id: 'map-1' }],
+      maps: [{ ...makeMindMap({ title: 'Private title', markdown: '# Private content' }), id: 'map-1' }],
       loading: false,
       error: new Error('denied')
     };
     view.rerender(<PrivateWorkspace />);
     expect(screen.getByRole('alert')).toHaveTextContent('Maps could not be loaded.');
     expect(screen.queryByText('Private title')).not.toBeInTheDocument();
+    expect(screen.queryByText('# Private content')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Search private maps' })).not.toBeInTheDocument();
   });
 
   it('keeps a draft when another map is selected before autosave unless discard is confirmed', async () => {
@@ -133,6 +153,48 @@ describe('PrivateWorkspace', () => {
     expect(screen.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Product');
     expect(mockedUpdateMindMapVersioned).not.toHaveBeenCalled();
     vi.useRealTimers();
+  });
+
+  it('offers private search in the workspace and applies the unsaved selection guard to a result', () => {
+    mapList.current = {
+      maps: [
+        { ...makeMindMap({ title: 'Architecture', markdown: '# Architecture' }), id: 'map-1' },
+        { ...makeMindMap({ title: 'Product roadmap', markdown: '# Product roadmap' }), id: 'map-2' }
+      ],
+      loading: false,
+      error: null
+    };
+    render(<PrivateWorkspace />);
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Markdown' }), { target: { value: '# Active draft' } });
+    const navigation = screen.getByRole('complementary', { name: 'Workspace navigation' });
+    const search = within(navigation).getByRole('region', { name: 'Private map search' });
+    fireEvent.change(within(search).getByRole('textbox', { name: 'Search private maps' }), { target: { value: 'roadmap' } });
+    fireEvent.click(within(search).getByRole('button', { name: 'Product roadmap' }));
+
+    expect(screen.getByRole('dialog', { name: 'Discard unsaved changes?' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Active draft');
+  });
+
+  it('opens safe folder archive from workspace navigation and requires an explicit destination', async () => {
+    mapList.current = {
+      maps: [{ ...makeMindMap({ folderId: 'folder-1' }), id: 'map-1' }],
+      loading: false,
+      error: null
+    };
+    render(<PrivateWorkspace />);
+
+    const navigation = screen.getByRole('complementary', { name: 'Workspace navigation' });
+    fireEvent.click(within(navigation).getByRole('button', { name: 'Archive Planning' }));
+    const dialog = screen.getByRole('dialog', { name: 'Archive Planning?' });
+    expect(within(dialog).getByRole('button', { name: 'Archive folder' })).toBeDisabled();
+
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'Move maps to' }), { target: { value: '__uncategorized__' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Archive folder' }));
+
+    await waitFor(() => expect(mockedMoveMapsAndArchiveFolder).toHaveBeenCalledWith({}, {
+      ownerUid: 'owner-uid', folderId: 'folder-1', destinationFolderId: null
+    }));
   });
 
   it('exposes Retry for a failed save and invokes the queue retry path', async () => {

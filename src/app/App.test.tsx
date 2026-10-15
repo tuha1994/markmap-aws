@@ -20,6 +20,10 @@ vi.mock('../features/access/accessRepository', () => ({
 vi.mock('../lib/firebase/client', () => ({
   getFirebaseClient: () => ({ firestore: {} })
 }));
+vi.mock('../features/folders/folderRepository', () => ({
+  subscribeFolders: () => vi.fn(),
+  moveMapsAndArchiveFolder: vi.fn()
+}));
 vi.mock('../features/mindmaps/useMindMapList', () => ({
   useMindMapList: () => ({
     maps: [{

@@ -10,11 +10,14 @@ import { MarkdownEditor } from '../features/editor/MarkdownEditor';
 import { SaveStatus } from '../features/editor/SaveStatus';
 import { useDirtyGuard } from '../features/editor/useDirtyGuard';
 import { useSaveQueue, type SaveStatus as SaveStatusValue } from '../features/editor/useSaveQueue';
+import { DeleteFolderDialog } from '../features/folders/DeleteFolderDialog';
 import { FolderSidebar } from '../features/folders/FolderSidebar';
+import { moveMapsAndArchiveFolder, subscribeFolders, type StoredFolder } from '../features/folders/folderRepository';
 import { getFirebaseClient } from '../lib/firebase/client';
 import { archiveMindMap, createMindMap, updateMindMapVersioned, type StoredMindMap } from '../features/mindmaps/mindMapRepository';
 import { MapActions } from '../features/mindmaps/MapActions';
 import { MapList } from '../features/mindmaps/MapList';
+import { MapSearch } from '../features/mindmaps/MapSearch';
 import { useMindMapList } from '../features/mindmaps/useMindMapList';
 import { MarkmapPreview } from '../features/preview/MarkmapPreview';
 import '../styles/workspace.css';
@@ -67,6 +70,9 @@ export function PrivateWorkspace() {
   const { maps, loading, error } = useMindMapList(ownerUid);
   const [selectedMapId, setSelectedMapId] = useState<string | null>(null);
   const [pendingMapId, setPendingMapId] = useState<string | null>(null);
+  const [folders, setFolders] = useState<StoredFolder[]>([]);
+  const [pendingFolderId, setPendingFolderId] = useState<string | null>(null);
+  const [folderOperationBusy, setFolderOperationBusy] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatusValue>('saved');
   const saveRetry = useRef<(() => void) | null>(null);
   const [operationError, setOperationError] = useState(false);
@@ -76,6 +82,14 @@ export function PrivateWorkspace() {
   const retryActiveSave = useCallback(() => saveRetry.current?.(), []);
   const client = getFirebaseClient();
   const selectedMap = maps.find((map) => map.id === selectedMapId) ?? null;
+  const pendingFolder = folders.find((folder) => folder.id === pendingFolderId) ?? null;
+
+  useEffect(() => {
+    setFolders([]);
+    setPendingFolderId(null);
+    if (!ownerUid || !client) return;
+    return subscribeFolders(client.firestore, ownerUid, setFolders, () => setOperationError(true));
+  }, [ownerUid]);
 
   useEffect(() => {
     if (selectedMapId && maps.some((map) => map.id === selectedMapId)) return;
@@ -128,10 +142,24 @@ export function PrivateWorkspace() {
     else setOperationError(true);
   }
 
+  async function archiveFolder(destinationFolderId: string | null) {
+    if (!pendingFolder || !ownerUid || !client) return;
+    setOperationError(false);
+    setFolderOperationBusy(true);
+    const result = await moveMapsAndArchiveFolder(client.firestore, {
+      ownerUid,
+      folderId: pendingFolder.id,
+      destinationFolderId
+    });
+    setFolderOperationBusy(false);
+    if (result.status === 'archived') setPendingFolderId(null);
+    else setOperationError(true);
+  }
+
   if (loading) return <main aria-label="Markmap AWS workspace"><WorkspaceFeedback kind="loading" /></main>;
   if (error || !client) return <main aria-label="Markmap AWS workspace"><WorkspaceFeedback kind="error" /></main>;
 
-  const sidebar = <><FolderSidebar mapCount={maps.length} /><MapActions mapTitle={selectedMap?.title} onCreate={createMap} onRename={renameMap} onArchive={archiveMap} disabled={saveStatus !== 'saved'} /><MapList maps={maps} selectedMapId={selectedMapId} onSelect={selectMap} /></>;
+  const sidebar = <><FolderSidebar folders={folders} maps={maps} onArchive={setPendingFolderId} archiveDisabled={saveStatus !== 'saved'} /><MapActions mapTitle={selectedMap?.title} onCreate={createMap} onRename={renameMap} onArchive={archiveMap} disabled={saveStatus !== 'saved'} /><MapSearch maps={maps} onSelect={selectMap} /><MapList maps={maps} selectedMapId={selectedMapId} onSelect={selectMap} /></>;
 
   return (
     <main aria-label="Markmap AWS workspace">
@@ -142,6 +170,16 @@ export function PrivateWorkspace() {
         <button type="button" onClick={() => void signOut()}>Sign out</button>
       </header>
       <MapWorkspace sidebar={sidebar} map={selectedMap} database={client.firestore} onStatus={setSaveStatus} onRetryChange={handleSaveRetryChange} />
+      {pendingFolder ? (
+        <DeleteFolderDialog
+          folder={pendingFolder}
+          folders={folders}
+          mapCount={maps.filter((map) => map.folderId === pendingFolder.id).length}
+          onArchive={archiveFolder}
+          onCancel={() => setPendingFolderId(null)}
+          busy={folderOperationBusy}
+        />
+      ) : null}
       {pendingMapId ? (
         <section role="dialog" aria-modal="true" aria-label="Discard unsaved changes?">
           <p>Your unsaved draft will be discarded if you switch maps.</p>
