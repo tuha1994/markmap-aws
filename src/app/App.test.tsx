@@ -17,6 +17,21 @@ vi.mock('../features/auth/AuthProvider', () => ({
 vi.mock('../features/access/accessRepository', () => ({
   getOwnAuthorization: vi.fn()
 }));
+vi.mock('../lib/firebase/client', () => ({
+  getFirebaseClient: () => ({ firestore: {} })
+}));
+vi.mock('../features/mindmaps/useMindMapList', () => ({
+  useMindMapList: () => ({
+    maps: [{
+      id: 'map-1', ownerUid: 'user-a', folderId: null, title: 'Workspace map', titleLower: 'workspace map',
+      markdown: '# Workspace map', contentSearchText: 'workspace map', contentVersion: 1,
+      currentRevisionId: null, currentRevisionAt: null, revisionPrunePending: false,
+      deletedAt: null, deletedByUid: null, createdAt: null, updatedAt: null
+    }],
+    loading: false,
+    error: null
+  })
+}));
 vi.mock('../features/preview/MarkmapPreview', () => ({
   MarkmapPreview: () => (
     <section aria-label="Mind map preview">
@@ -143,7 +158,7 @@ describe('App auth and access composition', () => {
   it('provides an authenticated live Markdown editor and Markmap preview demo', async () => {
     render(<App />);
 
-    await screen.findByRole('main', { name: 'Markmap AWS workspace' });
+    await screen.findByRole('textbox', { name: 'Markdown' });
     expect(screen.getByRole('textbox', { name: 'Markdown' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Mind map preview' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Fit preview' })).toBeInTheDocument();
