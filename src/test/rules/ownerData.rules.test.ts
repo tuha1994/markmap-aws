@@ -6,6 +6,7 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment
 } from '@firebase/rules-unit-testing';
+import { firestoreEmulatorEndpoint } from './emulator';
 import {
   collection,
   deleteDoc,
@@ -94,7 +95,7 @@ async function seedApproved(uid: string, enabled = true): Promise<void> {
 beforeAll(async () => {
   testEnv = await initializeTestEnvironment({
     projectId,
-    firestore: { rules: readFileSync('firestore.rules', 'utf8') }
+    firestore: { ...firestoreEmulatorEndpoint(), rules: readFileSync('firestore.rules', 'utf8') }
   });
 });
 

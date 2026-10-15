@@ -16,6 +16,7 @@ import type { RevisionReason } from './revisionTypes';
 
 export type SaveResult =
   | { status: 'saved'; revisionId: string; prunePending: boolean }
+  | { status: 'prune-pending' }
   | { status: 'conflict' }
   | { status: 'error'; error: Error };
 
@@ -38,6 +39,7 @@ export async function createRevisionAndSaveMap(
   const revisionsReference = collection(mapReference, 'revisions');
   const revisionReference = doc(revisionsReference);
 
+  let autosaveSuppressed = false;
   try {
     await runTransaction(database, async (transaction) => {
       const mapSnapshot = await transaction.get(mapReference);
@@ -47,6 +49,10 @@ export async function createRevisionAndSaveMap(
       }
 
       const map = mapSnapshot.data();
+      if (input.reason === 'autosave' && map.revisionPrunePending === true) {
+        autosaveSuppressed = true;
+        return;
+      }
       if (map.contentVersion !== input.expectedContentVersion) {
         throw new RevisionConflictError();
       }
@@ -85,6 +91,10 @@ export async function createRevisionAndSaveMap(
     return { status: 'error', error: toError(error) };
   }
 
+  if (autosaveSuppressed) {
+    return { status: 'prune-pending' };
+  }
+
   const prunePending = await pruneOldestExcessRevision(database, mapReference, revisionsReference);
   return { status: 'saved', revisionId: revisionReference.id, prunePending };
 }
@@ -94,12 +104,12 @@ async function pruneOldestExcessRevision(
   mapReference: ReturnType<typeof doc>,
   revisionsReference: ReturnType<typeof collection>
 ): Promise<boolean> {
-  const revisions = await getDocs(query(revisionsReference, orderBy('createdAt', 'asc'), limit(51)));
-  if (revisions.docs.length <= 50) {
-    return false;
-  }
-
   try {
+    const revisions = await getDocs(query(revisionsReference, orderBy('createdAt', 'asc'), limit(51)));
+    if (revisions.docs.length <= 50) {
+      return false;
+    }
+
     await deleteDoc(revisions.docs[0].ref);
     await updateDoc(mapReference, { revisionPrunePending: false });
     return false;

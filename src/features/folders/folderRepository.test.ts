@@ -5,12 +5,16 @@ const firestore = vi.hoisted(() => ({
   onSnapshot: vi.fn(),
   orderBy: vi.fn(),
   query: vi.fn(),
-  where: vi.fn()
+  where: vi.fn(),
+  doc: vi.fn(),
+  getDoc: vi.fn(),
+  updateDoc: vi.fn(),
+  serverTimestamp: vi.fn()
 }));
 
 vi.mock('firebase/firestore', () => firestore);
 
-import { subscribeFolders } from './folderRepository';
+import { renameFolder, subscribeFolders } from './folderRepository';
 
 describe('subscribeFolders', () => {
   it('queries active folders with ownerUid equality and sort ordering', () => {
@@ -37,5 +41,18 @@ describe('subscribeFolders', () => {
       'sort-order'
     );
     expect(firestore.onSnapshot).toHaveBeenCalledWith(activeFoldersQuery, expect.any(Function), expect.any(Function));
+  });
+});
+
+describe('renameFolder', () => {
+  it('reports a distinct renamed status after a successful rename', async () => {
+    const reference = { id: 'folder-1' };
+    firestore.doc.mockReturnValue(reference);
+    firestore.getDoc.mockResolvedValue({ exists: () => true, data: () => ({ ownerUid: 'owner-uid', archivedAt: null }) });
+    firestore.updateDoc.mockResolvedValue(undefined);
+    firestore.serverTimestamp.mockReturnValue('server-time');
+
+    await expect(renameFolder({} as never, 'owner-uid', 'folder-1', 'Renamed')).resolves.toEqual({ status: 'renamed' });
+    expect(firestore.updateDoc).toHaveBeenCalledWith(reference, expect.objectContaining({ name: 'Renamed', updatedAt: 'server-time' }));
   });
 });

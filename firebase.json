@@ -5,7 +5,7 @@
   },
   "emulators": {
     "firestore": {
-      "port": 8085
+      "port": 8090
     },
     "hub": {
       "port": 4400

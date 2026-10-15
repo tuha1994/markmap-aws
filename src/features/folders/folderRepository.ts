@@ -78,7 +78,7 @@ export async function renameFolder(database: Firestore, ownerUid: string, folder
   } catch (error) {
     return { status: 'error', error: toError(error) };
   }
-  return { status: 'archived' };
+  return { status: 'renamed' };
 }
 
 export type MoveMapsAndArchiveFolderInput = {
@@ -89,7 +89,11 @@ export type MoveMapsAndArchiveFolderInput = {
 
 export type FolderOperationResult =
   | { status: 'archived' }
-  | { status: 'error'; error: Error };
+  | { status: 'renamed' }
+  | { status: 'partial'; mapsMoved: number; retryable: true }
+  | { status: 'error'; error: Error; retryable?: true };
+
+const MAX_MAP_RELOCATION_WRITES = 400;
 
 export async function moveMapsAndArchiveFolder(
   database: Firestore,
@@ -124,17 +128,41 @@ export async function moveMapsAndArchiveFolder(
       throw new Error('The folder contains an invalid map.');
     }
 
-    const batch = writeBatch(database);
-    const timestamp = serverTimestamp();
-    for (const map of mapSnapshots.docs) {
-      batch.update(map.ref, { folderId: input.destinationFolderId, updatedAt: timestamp });
+    let mapsMoved = 0;
+    for (let start = 0; start < mapSnapshots.docs.length; start += MAX_MAP_RELOCATION_WRITES) {
+      const mapChunk = mapSnapshots.docs.slice(start, start + MAX_MAP_RELOCATION_WRITES);
+      const batch = writeBatch(database);
+      const timestamp = serverTimestamp();
+      for (const map of mapChunk) {
+        const contentVersion = map.data().contentVersion;
+        if (typeof contentVersion !== 'number') {
+          throw new Error('The folder contains a map with an invalid content version.');
+        }
+        batch.update(map.ref, {
+          folderId: input.destinationFolderId,
+          contentVersion: contentVersion + 1,
+          updatedAt: timestamp
+        });
+      }
+      try {
+        await batch.commit();
+      } catch (error) {
+        if (mapsMoved > 0) {
+          return { status: 'partial', mapsMoved, retryable: true };
+        }
+        return { status: 'error', error: toError(error), retryable: true };
+      }
+      mapsMoved += mapChunk.length;
     }
-    batch.update(sourceFolder, {
+
+    const archiveBatch = writeBatch(database);
+    const timestamp = serverTimestamp();
+    archiveBatch.update(sourceFolder, {
       archivedAt: timestamp,
       archivedByUid: input.ownerUid,
       updatedAt: timestamp
     });
-    await batch.commit();
+    await archiveBatch.commit();
   } catch (error) {
     return { status: 'error', error: toError(error) };
   }

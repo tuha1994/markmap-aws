@@ -29,4 +29,23 @@ Observed expected RED failures before implementations for:
 
 ## Environment note
 
-`firebase emulators:exec` could not start because port 8085 was already occupied. The existing emulator responded when explicitly targeted through `FIRESTORE_EMULATOR_HOST=127.0.0.1:8085`, and the Rules suite passed there.
+`npm run test:rules` now starts its own Firestore Emulator through `firebase emulators:exec`, using the project-local configured port `8090` and test initialization that parses `FIRESTORE_EMULATOR_HOST` (with the same `127.0.0.1:8090` fallback). It no longer depends on a pre-existing emulator at port 8085.
+
+## Review-fix evidence
+
+### Strict RED → GREEN regressions
+
+- **Folder relocation versioning and batching:** added an emulator-backed repository regression with 501 maps. RED returned a Rules `PERMISSION_DENIED` because relocation changed `folderId` without increasing `contentVersion`. GREEN relocates every map in 400-write chunks, increments each `contentVersion` from 1 to 2 exactly once, updates `updatedAt`, then archives only after all relocation batches succeed.
+- **Autosave while prune is pending:** added an emulator-backed regression. RED created an `autosave` revision and returned `saved`; GREEN returns `{ status: 'prune-pending' }`, leaves the current map untouched, and creates no revision snapshot.
+- **Prune query failure after commit:** added a repository regression whose RED rejected with `prune read denied`. GREEN preserves the committed map/revision transaction, best-effort marks `revisionPrunePending: true`, and returns `{ status: 'saved', prunePending: true }` rather than a misleading save failure.
+- **Relocation chunk failure:** added a 401-map unit regression. RED returned `archived`; GREEN returns `{ status: 'partial', mapsMoved: 400, retryable: true }` when the later batch fails and does not archive the source folder.
+- **Rename result:** added a regression whose RED returned `{ status: 'archived' }`; GREEN returns `{ status: 'renamed' }`.
+
+### Final verification
+
+- `npm test` — 16 files / 28 tests passed.
+- `npm run test:rules` — self-contained Emulator execution; 3 files / 12 tests passed, including the two repository integration regressions.
+- `npm run lint` — passed.
+- `npm run typecheck` — passed.
+- `npm run build` — passed (existing Vite chunk-size advisory only).
+- `git diff --check` — passed.
