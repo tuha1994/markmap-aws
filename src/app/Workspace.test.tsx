@@ -106,8 +106,21 @@ describe('PrivateWorkspace', () => {
     expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Unsaved changes');
 
     fireEvent.click(navigation.getByRole('button', { name: 'Product' }));
-    expect(screen.getByRole('dialog', { name: 'Discard unsaved changes?' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    const discardDialog = screen.getByRole('dialog', { name: 'Discard unsaved changes?' });
+    const keepEditing = within(discardDialog).getByRole('button', { name: 'Keep editing' });
+    expect(keepEditing).toHaveFocus();
+
+    fireEvent.keyDown(keepEditing, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Discard unsaved changes?' })).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Active draft');
+
+    fireEvent.click(navigation.getByRole('button', { name: 'Product' }));
+    const reopenedDiscardDialog = screen.getByRole('dialog', { name: 'Discard unsaved changes?' });
+    const reopenedKeepEditing = within(reopenedDiscardDialog).getByRole('button', { name: 'Keep editing' });
+    expect(reopenedKeepEditing).toHaveFocus();
+    fireEvent.keyDown(reopenedKeepEditing, { key: 'Enter' });
+    expect(screen.queryByRole('dialog', { name: 'Discard unsaved changes?' })).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Active draft');
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1499);

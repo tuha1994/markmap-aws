@@ -44,3 +44,11 @@ No Firebase production calls, Rules deployment, or deployment actions were perfo
 - Wired the error-state `SaveStatus` Retry action to the active `useSaveQueue.retry` callback.
 - Added workspace regressions covering a draft typed and retained before the 1.5-second autosave delay, explicit discard before switching, and a failed save retried through the visible Retry control.
 - Verification after the follow-up: `npm test` — 30 files, 67 tests passed; `npm run lint`, `npm run typecheck`, and `npm run build` passed. The build retained Vite's existing chunk-size advisory.
+
+## Review Follow-up — Safe Discard Default
+
+- Reordered the discard-switch dialog so **Keep editing** is the first actionable control and gave it initial focus.
+- Escape and Enter on that focused control both cancel the dialog, retaining the active draft and map; only the following **Discard and switch** action can discard.
+- Added a workspace regression that proves initial focus plus Escape/Enter retention behavior.
+- TDD evidence: the focused regression failed before implementation because **Keep editing** did not receive focus; after the minimal change it passed.
+- Verification: `npm test -- src/app/Workspace.test.tsx` — 1 file, 4 tests passed; `npm test` — 30 files, 67 tests passed; `npm run lint`, `npm run typecheck`, and `npm run build` passed. `git diff --check` passed. Vite retained its existing chunk-size advisory.

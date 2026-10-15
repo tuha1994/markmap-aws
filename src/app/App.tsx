@@ -145,8 +145,20 @@ export function PrivateWorkspace() {
       {pendingMapId ? (
         <section role="dialog" aria-modal="true" aria-label="Discard unsaved changes?">
           <p>Your unsaved draft will be discarded if you switch maps.</p>
+          <button
+            autoFocus
+            type="button"
+            onClick={() => setPendingMapId(null)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape' || event.key === 'Enter') {
+                event.preventDefault();
+                setPendingMapId(null);
+              }
+            }}
+          >
+            Keep editing
+          </button>
           <button type="button" onClick={discardAndSelectMap}>Discard and switch</button>
-          <button type="button" onClick={() => setPendingMapId(null)}>Keep editing</button>
         </section>
       ) : null}
     </main>
