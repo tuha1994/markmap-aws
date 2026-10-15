@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { WorkspaceFeedback } from '../components/feedback/WorkspaceFeedback';
 import { AppShell } from '../components/layout/AppShell';
@@ -28,28 +28,33 @@ type MapWorkspaceProps = {
   map: StoredMindMap | null;
   database: NonNullable<ReturnType<typeof getFirebaseClient>>['firestore'];
   onStatus(status: SaveStatusValue): void;
+  onRetryChange(retry: (() => void) | null): void;
 };
 
 function EmptyPane({ label, children }: { label: string; children: ReactNode }) {
   return <section aria-label={label}>{children}</section>;
 }
 
-function MapWorkspace({ sidebar, map, database, onStatus }: MapWorkspaceProps) {
+function MapWorkspace({ sidebar, map, database, onStatus, onRetryChange }: MapWorkspaceProps) {
   if (!map) {
     const editor = <EmptyPane label="Markdown editor"><p>Select or create a map to begin editing.</p></EmptyPane>;
     const preview = <EmptyPane label="Preview pane"><p>A preview appears after a map is selected.</p></EmptyPane>;
     return <><AppShell sidebar={sidebar} editor={editor} preview={preview} /><ResponsivePaneTabs maps={sidebar} editor={editor} preview={preview} /></>;
   }
 
-  return <SelectedMapWorkspace sidebar={sidebar} map={map} database={database} onStatus={onStatus} />;
+  return <SelectedMapWorkspace sidebar={sidebar} map={map} database={database} onStatus={onStatus} onRetryChange={onRetryChange} />;
 }
 
-function SelectedMapWorkspace({ sidebar, map, database, onStatus }: Omit<MapWorkspaceProps, 'map'> & { map: StoredMindMap }) {
+function SelectedMapWorkspace({ sidebar, map, database, onStatus, onRetryChange }: Omit<MapWorkspaceProps, 'map'> & { map: StoredMindMap }) {
   const repository = useMemo(() => ({ update: (input: Parameters<typeof updateMindMapVersioned>[1]) => updateMindMapVersioned(database, input) }), [database]);
   const queue = useSaveQueue(map, repository);
   useDirtyGuard(queue.status === 'unsaved' || queue.status === 'offlinePending' || queue.status === 'error');
 
   useEffect(() => onStatus(queue.status), [onStatus, queue.status]);
+  useEffect(() => {
+    onRetryChange(() => queue.retry());
+    return () => onRetryChange(null);
+  }, [onRetryChange, queue.retry]);
 
   const editor = <MarkdownEditor value={queue.draft} onChange={queue.setDraft} />;
   const preview = <MarkmapPreview markdown={queue.draft} />;
@@ -61,8 +66,14 @@ export function PrivateWorkspace() {
   const ownerUid = user?.uid ?? null;
   const { maps, loading, error } = useMindMapList(ownerUid);
   const [selectedMapId, setSelectedMapId] = useState<string | null>(null);
+  const [pendingMapId, setPendingMapId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatusValue>('saved');
+  const saveRetry = useRef<(() => void) | null>(null);
   const [operationError, setOperationError] = useState(false);
+  const handleSaveRetryChange = useCallback((retry: (() => void) | null) => {
+    saveRetry.current = retry;
+  }, []);
+  const retryActiveSave = useCallback(() => saveRetry.current?.(), []);
   const client = getFirebaseClient();
   const selectedMap = maps.find((map) => map.id === selectedMapId) ?? null;
 
@@ -70,6 +81,21 @@ export function PrivateWorkspace() {
     if (selectedMapId && maps.some((map) => map.id === selectedMapId)) return;
     setSelectedMapId(maps[0]?.id ?? null);
   }, [maps, selectedMapId]);
+
+  function selectMap(mapId: string) {
+    if (mapId === selectedMapId) return;
+    if (saveStatus !== 'saved') {
+      setPendingMapId(mapId);
+      return;
+    }
+    setSelectedMapId(mapId);
+  }
+
+  function discardAndSelectMap() {
+    if (!pendingMapId) return;
+    setSelectedMapId(pendingMapId);
+    setPendingMapId(null);
+  }
 
   async function createMap(title: string) {
     if (!ownerUid || !client) return;
@@ -105,17 +131,24 @@ export function PrivateWorkspace() {
   if (loading) return <main aria-label="Markmap AWS workspace"><WorkspaceFeedback kind="loading" /></main>;
   if (error || !client) return <main aria-label="Markmap AWS workspace"><WorkspaceFeedback kind="error" /></main>;
 
-  const sidebar = <><FolderSidebar mapCount={maps.length} /><MapActions mapTitle={selectedMap?.title} onCreate={createMap} onRename={renameMap} onArchive={archiveMap} disabled={saveStatus !== 'saved'} /><MapList maps={maps} selectedMapId={selectedMapId} onSelect={setSelectedMapId} /></>;
+  const sidebar = <><FolderSidebar mapCount={maps.length} /><MapActions mapTitle={selectedMap?.title} onCreate={createMap} onRename={renameMap} onArchive={archiveMap} disabled={saveStatus !== 'saved'} /><MapList maps={maps} selectedMapId={selectedMapId} onSelect={selectMap} /></>;
 
   return (
     <main aria-label="Markmap AWS workspace">
       <header className="workspace-header">
         <h1>{selectedMap?.title ?? 'Private workspace'}</h1>
-        <SaveStatus status={saveStatus} />
+        <SaveStatus status={saveStatus} onRetry={saveStatus === 'error' ? retryActiveSave : undefined} />
         {operationError ? <p role="alert">The map action could not be completed.</p> : null}
         <button type="button" onClick={() => void signOut()}>Sign out</button>
       </header>
-      <MapWorkspace sidebar={sidebar} map={selectedMap} database={client.firestore} onStatus={setSaveStatus} />
+      <MapWorkspace sidebar={sidebar} map={selectedMap} database={client.firestore} onStatus={setSaveStatus} onRetryChange={handleSaveRetryChange} />
+      {pendingMapId ? (
+        <section role="dialog" aria-modal="true" aria-label="Discard unsaved changes?">
+          <p>Your unsaved draft will be discarded if you switch maps.</p>
+          <button type="button" onClick={discardAndSelectMap}>Discard and switch</button>
+          <button type="button" onClick={() => setPendingMapId(null)}>Keep editing</button>
+        </section>
+      ) : null}
     </main>
   );
 }

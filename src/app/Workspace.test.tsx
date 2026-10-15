@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { makeMindMap } from '../test/factories';
@@ -26,17 +26,6 @@ vi.mock('../features/mindmaps/mindMapRepository', async (importOriginal) => {
     updateMindMapVersioned: vi.fn()
   };
 });
-vi.mock('../features/editor/useSaveQueue', () => ({
-  useSaveQueue: (map: { markdown: string }) => ({
-    draft: map.markdown,
-    setDraft: vi.fn(),
-    status: 'saved',
-    conflict: null,
-    retry: vi.fn(),
-    saveVersion: vi.fn(),
-    resolveConflict: vi.fn()
-  })
-}));
 vi.mock('../features/preview/MarkmapPreview', () => ({
   MarkmapPreview: () => <section aria-label="Mind map preview" />
 }));
@@ -98,5 +87,60 @@ describe('PrivateWorkspace', () => {
     view.rerender(<PrivateWorkspace />);
     expect(screen.getByRole('alert')).toHaveTextContent('Maps could not be loaded.');
     expect(screen.queryByText('Private title')).not.toBeInTheDocument();
+  });
+
+  it('keeps a draft when another map is selected before autosave unless discard is confirmed', async () => {
+    vi.useFakeTimers();
+    mapList.current = {
+      maps: [
+        { ...makeMindMap({ title: 'Architecture', markdown: '# Architecture' }), id: 'map-1' },
+        { ...makeMindMap({ title: 'Product', markdown: '# Product' }), id: 'map-2' }
+      ],
+      loading: false,
+      error: null
+    };
+    render(<PrivateWorkspace />);
+
+    const navigation = within(screen.getByRole('complementary', { name: 'Workspace navigation' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Markdown' }), { target: { value: '# Active draft' } });
+    expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Unsaved changes');
+
+    fireEvent.click(navigation.getByRole('button', { name: 'Product' }));
+    expect(screen.getByRole('dialog', { name: 'Discard unsaved changes?' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1499);
+    });
+    expect(screen.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Active draft');
+    expect(mockedUpdateMindMapVersioned).not.toHaveBeenCalled();
+
+    fireEvent.click(navigation.getByRole('button', { name: 'Product' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Discard and switch' }));
+    expect(screen.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Product');
+    expect(mockedUpdateMindMapVersioned).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('exposes Retry for a failed save and invokes the queue retry path', async () => {
+    vi.useFakeTimers();
+    mockedUpdateMindMapVersioned
+      .mockResolvedValueOnce({ status: 'error', error: new Error('temporary failure') } as never)
+      .mockResolvedValueOnce({ status: 'updated', contentVersion: 2 });
+    render(<PrivateWorkspace />);
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Markdown' }), { target: { value: '# Retry draft' } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Save failed');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      await Promise.resolve();
+    });
+    expect(mockedUpdateMindMapVersioned).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Saved');
+    vi.useRealTimers();
   });
 });

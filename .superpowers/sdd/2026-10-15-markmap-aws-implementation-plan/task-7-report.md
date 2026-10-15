@@ -37,3 +37,10 @@ Observed RED failures before implementation for:
 ## Notes
 
 No Firebase production calls, Rules deployment, or deployment actions were performed.
+
+## Review Follow-up — Draft Selection and Retry
+
+- Added a protected map-selection flow: any save status other than `saved` opens an accessible confirmation dialog. "Keep editing" is the default cancel path; only "Discard and switch" changes the active map.
+- Wired the error-state `SaveStatus` Retry action to the active `useSaveQueue.retry` callback.
+- Added workspace regressions covering a draft typed and retained before the 1.5-second autosave delay, explicit discard before switching, and a failed save retried through the visible Retry control.
+- Verification after the follow-up: `npm test` — 30 files, 67 tests passed; `npm run lint`, `npm run typecheck`, and `npm run build` passed. The build retained Vite's existing chunk-size advisory.
