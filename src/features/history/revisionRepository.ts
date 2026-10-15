@@ -2,6 +2,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   limit,
   orderBy,
@@ -178,34 +179,79 @@ export async function createRevisionAndSaveMap(
 
 export async function retryRevisionPrune(database: Firestore, mapId: string): Promise<boolean> {
   const mapReference = doc(database, 'mindMaps', mapId);
-  return pruneOldestExcessRevision(database, mapReference, collection(mapReference, 'revisions'), true);
+  const revisionsReference = collection(mapReference, 'revisions');
+
+  try {
+    for (;;) {
+      const mapSnapshot = await getDoc(mapReference);
+      if (!mapSnapshot.exists()) {
+        throw new Error('The mind map is unavailable.');
+      }
+      const revisions = await getDocs(query(revisionsReference, orderBy('createdAt', 'asc'), limit(51)));
+      if (revisions.docs.length > 50) {
+        await deleteDoc(revisions.docs[0].ref);
+        continue;
+      }
+
+      const cleared = await runTransaction(database, async (transaction) => {
+        const latestMapSnapshot = await transaction.get(mapReference);
+        if (!latestMapSnapshot.exists() || !hasSameMapFence(mapSnapshot, latestMapSnapshot)) {
+          return false;
+        }
+
+        transaction.update(mapReference, { revisionPrunePending: false, updatedAt: serverTimestamp() });
+        return true;
+      });
+      if (cleared) {
+        return false;
+      }
+    }
+  } catch {
+    try {
+      await updateDoc(mapReference, { revisionPrunePending: true, updatedAt: serverTimestamp() });
+    } catch {
+      // The committed map/revision transaction remains durable even if status cannot be updated.
+    }
+    return true;
+  }
 }
 
 async function pruneOldestExcessRevision(
   database: Firestore,
   mapReference: ReturnType<typeof doc>,
-  revisionsReference: ReturnType<typeof collection>,
-  clearPendingWhenAtCap = false
+  revisionsReference: ReturnType<typeof collection>
 ): Promise<boolean> {
   try {
     for (;;) {
       const revisions = await getDocs(query(revisionsReference, orderBy('createdAt', 'asc'), limit(51)));
       if (revisions.docs.length <= 50) {
-        if (clearPendingWhenAtCap) {
-          await updateDoc(mapReference, { revisionPrunePending: false });
-        }
         return false;
       }
       await deleteDoc(revisions.docs[0].ref);
     }
   } catch {
     try {
-      await updateDoc(mapReference, { revisionPrunePending: true });
+      await updateDoc(mapReference, { revisionPrunePending: true, updatedAt: serverTimestamp() });
     } catch {
       // The committed map/revision transaction remains durable even if status cannot be updated.
     }
     return true;
   }
+}
+
+function hasSameMapFence(
+  first: { data: () => { updatedAt?: unknown } | undefined },
+  second: { data: () => { updatedAt?: unknown } | undefined }
+): boolean {
+  const firstUpdatedAt = first.data()?.updatedAt;
+  const secondUpdatedAt = second.data()?.updatedAt;
+  if (firstUpdatedAt === undefined || firstUpdatedAt === null
+    || secondUpdatedAt === undefined || secondUpdatedAt === null) {
+    return false;
+  }
+  return typeof (firstUpdatedAt as { isEqual?: unknown }).isEqual === 'function'
+    ? (firstUpdatedAt as { isEqual: (other: unknown) => boolean }).isEqual(secondUpdatedAt)
+    : firstUpdatedAt === secondUpdatedAt;
 }
 
 function isRecentSnapshot(createdAt: unknown): boolean {

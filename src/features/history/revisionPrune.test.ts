@@ -4,6 +4,7 @@ const firestore = vi.hoisted(() => ({
   collection: vi.fn(),
   deleteDoc: vi.fn(),
   doc: vi.fn(),
+  getDoc: vi.fn(),
   getDocs: vi.fn(),
   limit: vi.fn(),
   orderBy: vi.fn(),
@@ -15,31 +16,87 @@ const firestore = vi.hoisted(() => ({
 
 vi.mock('firebase/firestore', () => firestore);
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => vi.resetAllMocks());
 
 import { createRevisionAndSaveMap, retryRevisionPrune } from './revisionRepository';
 
 describe('revision prune failure', () => {
-  it('retries pending cleanup without creating a revision and restores the hard cap of 50', async () => {
+  it('does not clear pending while an interleaved save leaves more than 50 revisions', async () => {
     const database = {} as never;
     const mapReference = { id: 'map-1' };
-    const oldestRevision = { id: 'revision-1' };
+    const firstVersion = { isEqual: (other: unknown) => other === firstVersion };
+    const secondVersion = { isEqual: (other: unknown) => other === secondVersion };
+    const state = { revisionCount: 50, revisionPrunePending: true, version: firstVersion };
+    let releaseFirstRevisionRead: (() => void) | undefined;
+    const firstRevisionReadStarted = new Promise<void>((resolve) => {
+      firestore.getDocs.mockImplementationOnce(() => new Promise((resume) => {
+        releaseFirstRevisionRead = () => resume({
+          docs: Array.from({ length: 50 }, (_, index) => ({ ref: { id: `revision-${index + 1}` } }))
+        });
+        resolve();
+      }));
+    });
 
     firestore.doc.mockReturnValue(mapReference);
     firestore.collection.mockReturnValue({ id: 'revisions' });
     firestore.query.mockReturnValue({ id: 'prune-query' });
+    firestore.getDoc.mockImplementation(async () => {
+      const version = state.version;
+      return { exists: () => true, data: () => ({ updatedAt: version }) };
+    });
+    firestore.getDocs.mockImplementation(async () => ({
+      docs: Array.from({ length: state.revisionCount }, (_, index) => ({ ref: { id: `revision-${index + 1}` } }))
+    }));
+    firestore.deleteDoc.mockImplementation(async () => {
+      state.revisionCount -= 1;
+    });
+    firestore.runTransaction.mockImplementation(async (_db: unknown, action: (transaction: { get: () => Promise<unknown>; update: (reference: unknown, patch: { revisionPrunePending: boolean }) => void }) => Promise<boolean>) => action({
+      get: async () => ({ exists: () => true, data: () => ({ updatedAt: state.version }) }),
+      update: (_reference, patch) => {
+        if (patch.revisionPrunePending === false && state.revisionCount > 50) {
+          throw new Error('cleared pending while over cap');
+        }
+        state.revisionPrunePending = patch.revisionPrunePending;
+      }
+    }));
+
+    const retry = retryRevisionPrune(database, 'map-1');
+    await firstRevisionReadStarted;
+    releaseFirstRevisionRead?.();
+    state.revisionCount = 51;
+    state.revisionPrunePending = true;
+    state.version = secondVersion;
+
+    await expect(retry).resolves.toBe(false);
+    expect(state).toEqual({ revisionCount: 50, revisionPrunePending: false, version: secondVersion });
+  });
+
+  it('retries pending cleanup without creating a revision and restores the hard cap of 50', async () => {
+    const database = {} as never;
+    const mapReference = { id: 'map-1' };
+    const oldestRevision = { id: 'revision-1' };
+    const version = { isEqual: (other: unknown) => other === version };
+    const transaction = {
+      get: vi.fn().mockResolvedValue({ exists: () => true, data: () => ({ updatedAt: version }) }),
+      update: vi.fn()
+    };
+
+    firestore.doc.mockReturnValue(mapReference);
+    firestore.collection.mockReturnValue({ id: 'revisions' });
+    firestore.query.mockReturnValue({ id: 'prune-query' });
+    firestore.getDoc.mockResolvedValue({ exists: () => true, data: () => ({ updatedAt: version }) });
     firestore.getDocs
       .mockResolvedValueOnce({ docs: Array.from({ length: 51 }, (_, index) => ({ ref: index === 0 ? oldestRevision : { id: `revision-${index + 1}` } })) })
       .mockResolvedValueOnce({ docs: Array.from({ length: 50 }, (_, index) => ({ ref: { id: `revision-${index + 2}` } })) });
     firestore.deleteDoc.mockResolvedValue(undefined);
-    firestore.updateDoc.mockResolvedValue(undefined);
+    firestore.runTransaction.mockImplementation(async (_db: unknown, action: (value: typeof transaction) => Promise<boolean>) => action(transaction));
 
     await expect(retryRevisionPrune(database, 'map-1')).resolves.toBe(false);
 
-    expect(firestore.runTransaction).not.toHaveBeenCalled();
+    expect(firestore.runTransaction).toHaveBeenCalledTimes(1);
     expect(firestore.deleteDoc).toHaveBeenCalledTimes(1);
     expect(firestore.deleteDoc).toHaveBeenCalledWith(oldestRevision);
-    expect(firestore.updateDoc).toHaveBeenCalledWith(mapReference, { revisionPrunePending: false });
+    expect(transaction.update).toHaveBeenCalledWith(mapReference, expect.objectContaining({ revisionPrunePending: false }));
   });
 
   it('retains pending cleanup when retry deletion fails without creating a revision', async () => {
@@ -50,6 +107,7 @@ describe('revision prune failure', () => {
     firestore.doc.mockReturnValue(mapReference);
     firestore.collection.mockReturnValue({ id: 'revisions' });
     firestore.query.mockReturnValue({ id: 'prune-query' });
+    firestore.getDoc.mockResolvedValue({ exists: () => true, data: () => ({ updatedAt: 'before-delete' }) });
     firestore.getDocs.mockResolvedValue({ docs: Array.from({ length: 51 }, (_, index) => ({ ref: index === 0 ? oldestRevision : { id: `revision-${index + 1}` } })) });
     firestore.deleteDoc.mockRejectedValue(new Error('delete denied'));
     firestore.updateDoc.mockResolvedValue(undefined);
@@ -58,7 +116,7 @@ describe('revision prune failure', () => {
 
     expect(firestore.runTransaction).not.toHaveBeenCalled();
     expect(firestore.deleteDoc).toHaveBeenCalledWith(oldestRevision);
-    expect(firestore.updateDoc).toHaveBeenCalledWith(mapReference, { revisionPrunePending: true });
+    expect(firestore.updateDoc).toHaveBeenCalledWith(mapReference, expect.objectContaining({ revisionPrunePending: true }));
   });
 
   it('keeps all revisions and marks prune pending if oldest-revision deletion fails', async () => {
@@ -96,7 +154,7 @@ describe('revision prune failure', () => {
     })).resolves.toEqual({ status: 'saved', revisionId: 'revision-51', prunePending: true });
 
     expect(firestore.deleteDoc).toHaveBeenCalledWith(oldestRevision);
-    expect(firestore.updateDoc).toHaveBeenCalledWith(mapReference, { revisionPrunePending: true });
+    expect(firestore.updateDoc).toHaveBeenCalledWith(mapReference, expect.objectContaining({ revisionPrunePending: true }));
   });
 
   it('returns a saved prune-pending result when the post-commit prune query fails', async () => {
@@ -123,6 +181,6 @@ describe('revision prune failure', () => {
     })).resolves.toEqual({ status: 'saved', revisionId: 'revision-51', prunePending: true });
 
     expect(transaction.set).toHaveBeenCalledWith(revisionReference, expect.objectContaining({ sourceContentVersion: 2 }));
-    expect(firestore.updateDoc).toHaveBeenCalledWith(mapReference, { revisionPrunePending: true });
+    expect(firestore.updateDoc).toHaveBeenCalledWith(mapReference, expect.objectContaining({ revisionPrunePending: true }));
   });
 });
