@@ -1,37 +1,55 @@
 import { useEffect, useRef, useState } from 'react';
 import { createMarkmapAdapter, type MarkmapAdapter } from './markmapAdapter';
+import { PreviewToolbar } from './PreviewToolbar';
 
-type Props = {
-  markdown: string;
-  createAdapter?: (svg: SVGSVGElement) => MarkmapAdapter;
-};
+type Props = { markdown: string; createAdapter?: (svg: SVGSVGElement) => MarkmapAdapter };
 
 export function MarkmapPreview({ markdown, createAdapter = createMarkmapAdapter }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const adapterRef = useRef<MarkmapAdapter | null>(null);
+  const mountedRef = useRef(false);
+  const renderTokenRef = useRef(0);
+  const [adapter, setAdapter] = useState<MarkmapAdapter | null>(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     if (!svgRef.current) return;
-    const adapter = createAdapter(svgRef.current);
-    adapterRef.current = adapter;
+    const nextAdapter = createAdapter(svgRef.current);
+    mountedRef.current = true;
+    adapterRef.current = nextAdapter;
+    setAdapter(nextAdapter);
     return () => {
-      adapter.destroy();
-      adapterRef.current = null;
+      mountedRef.current = false;
+      renderTokenRef.current += 1;
+      nextAdapter.destroy();
+      if (adapterRef.current === nextAdapter) adapterRef.current = null;
     };
   }, [createAdapter]);
 
   useEffect(() => {
-    const adapter = adapterRef.current;
-    if (!adapter) return;
+    const activeAdapter = adapterRef.current;
+    if (!activeAdapter) return;
+    const renderToken = ++renderTokenRef.current;
+
     const timer = window.setTimeout(() => {
-      void adapter.render(markdown).then(() => setError(false)).catch(() => setError(true));
+      void activeAdapter.render(markdown).then(
+        () => {
+          if (mountedRef.current && adapterRef.current === activeAdapter && renderTokenRef.current === renderToken) setError(false);
+        },
+        () => {
+          if (mountedRef.current && adapterRef.current === activeAdapter && renderTokenRef.current === renderToken) setError(true);
+        },
+      );
     }, 300);
-    return () => window.clearTimeout(timer);
-  }, [markdown]);
+    return () => {
+      window.clearTimeout(timer);
+      renderTokenRef.current += 1;
+    };
+  }, [markdown, adapter]);
 
   return (
     <section aria-label="Mind map preview">
+      <PreviewToolbar adapter={adapter} />
       {error ? <p role="alert">Unable to render preview</p> : null}
       <svg ref={svgRef} aria-label="Markmap preview" />
     </section>

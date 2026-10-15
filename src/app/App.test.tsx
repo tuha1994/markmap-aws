@@ -6,6 +6,7 @@ import { AccessGate } from '../features/access/AccessGate';
 import { getOwnAuthorization } from '../features/access/accessRepository';
 import { AuthGate } from '../features/auth/AuthGate';
 import { useAuth } from '../features/auth/AuthProvider';
+import { App } from './App';
 
 const auth = vi.hoisted(() => ({ current: null as unknown }));
 
@@ -15,6 +16,13 @@ vi.mock('../features/auth/AuthProvider', () => ({
 }));
 vi.mock('../features/access/accessRepository', () => ({
   getOwnAuthorization: vi.fn()
+}));
+vi.mock('../features/preview/MarkmapPreview', () => ({
+  MarkmapPreview: () => (
+    <section aria-label="Mind map preview">
+      <button type="button">Fit preview</button>
+    </section>
+  )
 }));
 const mockedGetOwnAuthorization = vi.mocked(getOwnAuthorization);
 
@@ -130,5 +138,14 @@ describe('App auth and access composition', () => {
     resolveBAuthorization?.({ enabled: true });
 
     await screen.findByRole('main', { name: 'Markmap AWS workspace' });
+  });
+
+  it('provides an authenticated live Markdown editor and Markmap preview demo', async () => {
+    render(<App />);
+
+    await screen.findByRole('main', { name: 'Markmap AWS workspace' });
+    expect(screen.getByRole('textbox', { name: 'Markdown' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Mind map preview' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Fit preview' })).toBeInTheDocument();
   });
 });

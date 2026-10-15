@@ -5,7 +5,8 @@ describe('sanitizeMarkdownForMarkmap', () => {
   it('escapes raw HTML and script-like payloads as inert text', () => {
     const result = sanitizeMarkdownForMarkmap('<img src=x onerror="alert(1)">\n<script>alert(1)</script>');
 
-    expect(result).toContain('&lt;img');
+    expect(result).not.toContain('src=x');
+    expect(result).not.toContain('<img');
     expect(result).toContain('&lt;script&gt;');
     expect(result).not.toContain('<script>');
   });
@@ -24,5 +25,21 @@ describe('sanitizeMarkdownForMarkmap', () => {
 
     expect(result).toBe('AWS diagram');
     expect(result).not.toContain('evil.example');
+  });
+
+  it('removes nested-alt, reference, and HTML image destinations without leaving their URLs', () => {
+    const input = [
+      '![alt [nested]](https://evil.example/inline.png)',
+      '![reference image][evil-image]',
+      '[evil-image]: https://evil.example/reference.png',
+      '<img src="https://evil.example/html.png" alt="HTML image">',
+    ].join('\n');
+
+    const result = sanitizeMarkdownForMarkmap(input);
+
+    expect(result).toContain('alt [nested]');
+    expect(result).toContain('reference image');
+    expect(result).toContain('HTML image');
+    expect(result).not.toMatch(/evil\.example|<img/i);
   });
 });
