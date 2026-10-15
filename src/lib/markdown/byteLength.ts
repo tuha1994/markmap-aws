@@ -3,5 +3,5 @@ export function utf8ByteLength(value: string): number {
 }
 
 export function isMarkdownWithinLimit(markdown: string): boolean {
-  return utf8ByteLength(markdown) <= 256 * 1024;
+  return utf8ByteLength(markdown) <= 262144;
 }

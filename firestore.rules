@@ -1,0 +1,253 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function accessPath(uid) {
+      return /databases/$(database)/documents/authorizedUsers/$(uid);
+    }
+
+    function approvedUid() {
+      return request.auth != null
+        && exists(accessPath(request.auth.uid))
+        && get(accessPath(request.auth.uid)).data.enabled == true;
+    }
+
+    function ownsExisting() {
+      return approvedUid() && resource.data.ownerUid == request.auth.uid;
+    }
+
+    function ownsCreate() {
+      return approvedUid() && request.resource.data.ownerUid == request.auth.uid;
+    }
+
+    function folderPath(folderId) {
+      return /databases/$(database)/documents/folders/$(folderId);
+    }
+
+    function mapPath(mapId) {
+      return /databases/$(database)/documents/mindMaps/$(mapId);
+    }
+
+    function isActiveFolder(folder) {
+      return folder.archivedAt == null;
+    }
+
+    function isActiveMap(map) {
+      return map.deletedAt == null;
+    }
+
+    function validFolderKeys(data) {
+      return data.keys().hasAll([
+          'ownerUid', 'name', 'normalizedName', 'color', 'sortOrder',
+          'archivedAt', 'archivedByUid', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerUid', 'name', 'normalizedName', 'color', 'sortOrder',
+          'archivedAt', 'archivedByUid', 'createdAt', 'updatedAt'
+        ]);
+    }
+
+    function validFolderTypes(data) {
+      return data.ownerUid is string
+        && data.name is string
+        && data.name.size() <= 80
+        && data.normalizedName is string
+        && (data.color == null || data.color is string)
+        && data.sortOrder is number
+        && (data.archivedAt == null || data.archivedAt is timestamp)
+        && (data.archivedByUid == null || data.archivedByUid is string)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function validFolder(data) {
+      return validFolderKeys(data) && validFolderTypes(data);
+    }
+
+    function validFolderCreate() {
+      return ownsCreate()
+        && validFolder(request.resource.data)
+        && request.resource.data.archivedAt == null
+        && request.resource.data.archivedByUid == null;
+    }
+
+    function validFolderArchiveTransition() {
+      return resource.data.archivedAt == null
+        && resource.data.archivedByUid == null
+        && (
+          (request.resource.data.archivedAt == null
+            && request.resource.data.archivedByUid == null)
+          || (request.resource.data.archivedAt is timestamp
+            && request.resource.data.archivedByUid == request.auth.uid)
+        );
+    }
+
+    function validFolderUpdate() {
+      return ownsExisting()
+        && isActiveFolder(resource.data)
+        && validFolder(request.resource.data)
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && validFolderArchiveTransition();
+    }
+
+    function validMarkdown(value) {
+      return value is string && value.toUtf8().size() <= 262144;
+    }
+
+    function validFolderReference(folderId) {
+      return folderId == null
+        || (folderId is string
+          && exists(folderPath(folderId))
+          && get(folderPath(folderId)).data.ownerUid == request.auth.uid
+          && get(folderPath(folderId)).data.archivedAt == null);
+    }
+
+    function validMapKeys(data) {
+      return data.keys().hasAll([
+          'ownerUid', 'folderId', 'title', 'titleLower', 'markdown',
+          'contentSearchText', 'contentVersion', 'currentRevisionId',
+          'currentRevisionAt', 'revisionPrunePending', 'deletedAt',
+          'deletedByUid', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerUid', 'folderId', 'title', 'titleLower', 'markdown',
+          'contentSearchText', 'contentVersion', 'currentRevisionId',
+          'currentRevisionAt', 'revisionPrunePending', 'deletedAt',
+          'deletedByUid', 'createdAt', 'updatedAt'
+        ]);
+    }
+
+    function validMapTypes(data) {
+      return data.ownerUid is string
+        && (data.folderId == null || data.folderId is string)
+        && data.title is string
+        && data.title.size() <= 120
+        && data.titleLower is string
+        && validMarkdown(data.markdown)
+        && validMarkdown(data.contentSearchText)
+        && data.contentVersion is number
+        && data.contentVersion >= 1
+        && (data.currentRevisionId == null || data.currentRevisionId is string)
+        && (data.currentRevisionAt == null || data.currentRevisionAt is timestamp)
+        && data.revisionPrunePending is bool
+        && (data.deletedAt == null || data.deletedAt is timestamp)
+        && (data.deletedByUid == null || data.deletedByUid is string)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function validMap(data) {
+      return validMapKeys(data) && validMapTypes(data);
+    }
+
+    function mapContentChanged() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'folderId', 'title', 'titleLower', 'markdown', 'contentSearchText',
+        'currentRevisionId', 'currentRevisionAt'
+      ]);
+    }
+
+    function validMapVersionTransition() {
+      return (mapContentChanged()
+          && request.resource.data.contentVersion == resource.data.contentVersion + 1)
+        || (!mapContentChanged()
+          && request.resource.data.contentVersion == resource.data.contentVersion);
+    }
+
+    function validMapDeleteTransition() {
+      return resource.data.deletedAt == null
+        && resource.data.deletedByUid == null
+        && (
+          (request.resource.data.deletedAt == null
+            && request.resource.data.deletedByUid == null)
+          || (request.resource.data.deletedAt is timestamp
+            && request.resource.data.deletedByUid == request.auth.uid)
+        );
+    }
+
+    function validMapCreate() {
+      return ownsCreate()
+        && validMap(request.resource.data)
+        && validFolderReference(request.resource.data.folderId)
+        && request.resource.data.deletedAt == null
+        && request.resource.data.deletedByUid == null;
+    }
+
+    function validMapUpdate() {
+      return ownsExisting()
+        && isActiveMap(resource.data)
+        && validMap(request.resource.data)
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && validMapVersionTransition()
+        && validMapDeleteTransition()
+        && (
+          request.resource.data.folderId == resource.data.folderId
+          || validFolderReference(request.resource.data.folderId)
+        );
+    }
+
+    function validRevisionKeys(data) {
+      return data.keys().hasAll([
+          'ownerUid', 'mapId', 'sourceContentVersion', 'title', 'folderId',
+          'markdown', 'reason', 'createdAt', 'createdByUid'
+        ])
+        && data.keys().hasOnly([
+          'ownerUid', 'mapId', 'sourceContentVersion', 'title', 'folderId',
+          'markdown', 'reason', 'createdAt', 'createdByUid'
+        ]);
+    }
+
+    function validRevision(data, mapId) {
+      return validRevisionKeys(data)
+        && data.ownerUid == request.auth.uid
+        && data.mapId == mapId
+        && data.sourceContentVersion is number
+        && data.sourceContentVersion >= 1
+        && data.title is string
+        && data.title.size() <= 120
+        && (data.folderId == null || data.folderId is string)
+        && validMarkdown(data.markdown)
+        && (data.reason == 'autosave'
+          || data.reason == 'manual'
+          || data.reason == 'restore-protection')
+        && data.createdAt is timestamp
+        && data.createdByUid == request.auth.uid;
+    }
+
+    function ownsActiveParentMap(mapId) {
+      return approvedUid()
+        && exists(mapPath(mapId))
+        && get(mapPath(mapId)).data.ownerUid == request.auth.uid
+        && get(mapPath(mapId)).data.deletedAt == null;
+    }
+
+    match /authorizedUsers/{uid} {
+      allow get: if approvedUid() && request.auth.uid == uid;
+    }
+
+    match /folders/{folderId} {
+      allow get, list: if ownsExisting() && isActiveFolder(resource.data);
+      allow create: if validFolderCreate();
+      allow update: if validFolderUpdate();
+    }
+
+    match /mindMaps/{mapId} {
+      allow get, list: if ownsExisting() && isActiveMap(resource.data);
+      allow create: if validMapCreate();
+      allow update: if validMapUpdate();
+
+      match /revisions/{revisionId} {
+        allow get, list: if ownsActiveParentMap(mapId);
+        allow create: if ownsActiveParentMap(mapId)
+          && validRevision(request.resource.data, mapId)
+          && validFolderReference(request.resource.data.folderId);
+        allow delete: if ownsActiveParentMap(mapId)
+          && resource.data.ownerUid == request.auth.uid
+          && resource.data.mapId == mapId
+          && get(mapPath(mapId)).data.currentRevisionId != revisionId;
+      }
+    }
+  }
+}
