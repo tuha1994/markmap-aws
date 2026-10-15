@@ -12,6 +12,7 @@ dist/
 # Firebase credentials and emulator state
 firebase-service-account*.json
 *service-account*.json
+*-firebase-adminsdk-*.json
 serviceAccountKey.json
 .firebase/
 firebase-emulator-data/
