@@ -31,18 +31,76 @@ test('renders access denial after a signed-in unapproved user is denied their au
   await expect(page.getByRole('main', { name: 'Markmap AWS workspace' })).toHaveCount(0);
 });
 
-test('keeps the authorized workspace Maps, Edit, and Preview panes operable at 360px', async ({ page }) => {
+test('keeps the authorized workspace Maps, Edit, and Preview panes operable at 360px without desktop focus controls or dividers', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 800 });
   await page.goto('./');
 
   await signInToLocalWorkspace(page);
   await expect(page.getByRole('main', { name: 'Markmap AWS workspace' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Focus mode' })).toBeHidden();
+  await expect(page.getByRole('separator')).toHaveCount(0);
+
   await page.getByRole('tab', { name: 'Maps' }).click();
   await expect(page.getByRole('tabpanel')).toContainText('E2E workspace map');
   await page.getByRole('tab', { name: 'Edit' }).click();
   await expect(page.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# E2E workspace map');
   await page.getByRole('tab', { name: 'Preview' }).click();
   await expect(page.getByRole('img', { name: 'Markmap preview' }).locator('.markmap-node')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Enter focus mode' }).click();
+  await expect(page.getByRole('tab', { name: 'Preview' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('button', { name: 'Exit focus mode' })).toBeVisible();
+});
+
+test('keeps desktop workspace resize bounds, focus editing, and native Markmap controls available', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('./');
+  await signInToLocalWorkspace(page);
+
+  const sidebarDivider = page.getByRole('separator', { name: 'Sidebar width' });
+  const editorDivider = page.getByRole('separator', { name: 'Editor width' });
+  const preview = page.getByRole('img', { name: 'Markmap preview' });
+  const previewPanel = page.getByLabel('Preview pane');
+  await expect(sidebarDivider).toHaveAttribute('aria-valuemin', '224');
+  await expect(sidebarDivider).toHaveAttribute('aria-valuemax', '420');
+  await sidebarDivider.press('End');
+  await expect(sidebarDivider).toHaveAttribute('aria-valuenow', '420');
+  await sidebarDivider.press('Home');
+  await expect(sidebarDivider).toHaveAttribute('aria-valuenow', '224');
+
+  await editorDivider.press('End');
+  const editorMaximum = Number(await editorDivider.getAttribute('aria-valuemax'));
+  expect(editorMaximum).toBeGreaterThanOrEqual(27);
+  expect(editorMaximum).toBeLessThanOrEqual(62);
+  await expect(editorDivider).toHaveAttribute('aria-valuenow', `${editorMaximum}`);
+  await expect(previewPanel).toHaveCSS('min-width', '320px');
+
+  await page.getByRole('button', { name: 'Focus mode', exact: true }).click();
+  await expect(page.getByLabel('Workspace navigation')).toBeHidden();
+  await expect(page.getByLabel('Markdown editor')).toBeHidden();
+  await expect(page.getByRole('separator')).toHaveCount(0);
+  for (const name of ['Zoom in', 'Zoom out', 'Fit preview', 'Reset preview']) {
+    await expect(page.getByRole('button', { name })).toBeVisible();
+  }
+  await page.getByRole('button', { name: 'Fit preview' }).click();
+  await expect(preview.locator('.markmap-node')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Exit focus mode' }).click();
+  await expect(page.getByRole('separator')).toHaveCount(2);
+  await expect(page.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# E2E workspace map');
+});
+
+test('persists a desktop theme preference as UI-only local state', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('./');
+  await signInToLocalWorkspace(page);
+
+  const workspace = page.getByRole('main', { name: 'Markmap AWS workspace' });
+  await page.getByRole('button', { name: 'Switch to dark theme' }).click();
+  await expect(workspace).toHaveAttribute('data-workspace-theme', 'dark');
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem('markmap-aws.workspace-layout'))).toBe('{"theme":"dark","mode":"edit","sidebarCollapsed":false}');
+
+  await page.reload();
+  await expect(workspace).toHaveAttribute('data-workspace-theme', 'dark');
+  await expect(page.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# E2E workspace map');
 });
 
 test('renders the native workspace Markmap preview and exercises its fit control', async ({ page }) => {
