@@ -6,7 +6,10 @@ import { ResponsivePaneTabs } from '../components/layout/ResponsivePaneTabs';
 import { AccessGate } from '../features/access/AccessGate';
 import { AuthGate } from '../features/auth/AuthGate';
 import { AuthProvider, useAuth } from '../features/auth/AuthProvider';
+import { ImportDialog } from '../features/editor/ImportDialog';
+import { type ParsedMarkdownFile } from '../features/editor/importMarkdown';
 import { MarkdownEditor } from '../features/editor/MarkdownEditor';
+import { downloadMarkdown } from '../features/editor/exportMarkdown';
 import { SaveStatus } from '../features/editor/SaveStatus';
 import { useDirtyGuard } from '../features/editor/useDirtyGuard';
 import { useSaveQueue, type SaveStatus as SaveStatusValue } from '../features/editor/useSaveQueue';
@@ -95,7 +98,7 @@ function SelectedMapWorkspace({ sidebar, map, database, onStatus, onRetryChange 
   }
 
   const history = <VersionHistoryPanel revisions={revisions} onRestore={setRevisionToRestore} onSaveVersion={queue.saveVersion} />;
-  const editor = <MarkdownEditor value={queue.draft} onChange={queue.setDraft} />;
+  const editor = <><MarkdownEditor value={queue.draft} onChange={queue.setDraft} /><button type="button" onClick={() => downloadMarkdown(map.title, queue.draft)}>Export Markdown</button></>;
   const preview = <MarkmapPreview markdown={queue.draft} />;
   return <>
     {restoreError ? <p role="alert">The revision could not be restored.</p> : null}
@@ -115,6 +118,7 @@ export function PrivateWorkspace() {
   const [pendingFolderId, setPendingFolderId] = useState<string | null>(null);
   const [folderOperationBusy, setFolderOperationBusy] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatusValue>('saved');
+  const [importOpen, setImportOpen] = useState(false);
   const saveRetry = useRef<(() => void) | null>(null);
   const [operationError, setOperationError] = useState(false);
   const handleSaveRetryChange = useCallback((retry: (() => void) | null) => {
@@ -165,6 +169,23 @@ export function PrivateWorkspace() {
     }
   }
 
+  async function importMap({ title, markdown }: ParsedMarkdownFile) {
+    if (!ownerUid || !client) {
+      throw new Error('The workspace is unavailable.');
+    }
+    setOperationError(false);
+    try {
+      const created = await createMindMap(client.firestore, {
+        ownerUid, folderId: null, title, markdown, contentSearchText: markdown.toLocaleLowerCase()
+      });
+      setSelectedMapId(created.id);
+      setImportOpen(false);
+    } catch (error) {
+      setOperationError(true);
+      throw error;
+    }
+  }
+
   async function renameMap(title: string) {
     if (!selectedMap || !client) return;
     setOperationError(false);
@@ -208,9 +229,11 @@ export function PrivateWorkspace() {
         <h1>{selectedMap?.title ?? 'Private workspace'}</h1>
         <SaveStatus status={saveStatus} onRetry={['error', 'prunePending'].includes(saveStatus) ? retryActiveSave : undefined} />
         {operationError ? <p role="alert">The map action could not be completed.</p> : null}
+        <button type="button" disabled={saveStatus !== 'saved'} onClick={() => setImportOpen(true)}>Import Markdown</button>
         <button type="button" onClick={() => void signOut()}>Sign out</button>
       </header>
       <MapWorkspace sidebar={sidebar} map={selectedMap} database={client.firestore} onStatus={setSaveStatus} onRetryChange={handleSaveRetryChange} />
+      {importOpen ? <ImportDialog onImport={importMap} onCancel={() => setImportOpen(false)} /> : null}
       {pendingFolder ? (
         <DeleteFolderDialog
           folder={pendingFolder}

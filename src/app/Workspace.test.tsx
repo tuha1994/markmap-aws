@@ -94,6 +94,23 @@ describe('PrivateWorkspace', () => {
     expect(mockedArchiveMindMap).toHaveBeenCalledWith({}, 'owner-uid', 'map-1');
   });
 
+  it('imports Markdown only as a new map after confirmation and blocks import while a draft is unsaved', async () => {
+    render(<PrivateWorkspace />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import Markdown' }));
+    fireEvent.change(screen.getByLabelText('Markdown file'), {
+      target: { files: [new File(['# Imported map'], 'Imported map.md', { type: 'text/markdown' })] }
+    });
+    await screen.findByText('Imported map');
+    fireEvent.click(screen.getByRole('button', { name: 'Import as new map' }));
+
+    await waitFor(() => expect(mockedCreateMindMap).toHaveBeenCalledWith({}, expect.objectContaining({
+      ownerUid: 'owner-uid', title: 'Imported map', markdown: '# Imported map', contentSearchText: '# imported map'
+    })));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Markdown' }), { target: { value: '# Unsaved draft' } });
+    expect(screen.getByRole('button', { name: 'Import Markdown' })).toBeDisabled();
+  });
+
   it('shows loading and save error states without rendering private map payloads', () => {
     mapList.current = {
       maps: [{ ...makeMindMap({ title: 'Private title', markdown: '# Private content' }), id: 'map-1' }],
