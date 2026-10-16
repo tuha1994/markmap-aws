@@ -28,6 +28,11 @@ internal-content/
 private-content/
 aws-partner-internal/
 
+# Documentation and agent artifacts kept private
+README.md
+docs/
+.superpowers/
+
 # Local browser-test output
 playwright-report/
 test-results/

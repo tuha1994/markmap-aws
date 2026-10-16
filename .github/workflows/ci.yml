@@ -13,6 +13,11 @@ on:
         required: false
         default: ""
         type: string
+      deploy_pages:
+        description: Deploy the prepared Pages artifact after all approval gates
+        required: true
+        default: false
+        type: boolean
   pull_request:
   push:
     branches:
@@ -138,3 +143,20 @@ jobs:
           echo "Pages artifact uploaded for approved ref: ${{ inputs.approved_ref || github.sha }}"
           echo "This job intentionally does not invoke actions/deploy-pages."
           echo "Production deployment requires separate release authorization."
+
+  deploy-pages:
+    name: Deploy approved Pages artifact
+    if: ${{ inputs.deploy_pages }}
+    needs: prepare-pages-artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy prepared Pages artifact
+        id: deployment
+        uses: actions/deploy-pages@v4
