@@ -33,6 +33,32 @@ describe('AppShell', () => {
     expect(screen.getByLabelText('Preview pane')).toHaveStyle({ minWidth: '320px' });
   });
 
+  it('clamps editor width to preserve the preview minimum from the measured pane width', () => {
+    const { container } = render(
+      <AppShell
+        sidebar={<p>Navigation</p>}
+        editor={<p>Editor</p>}
+        preview={<p>Preview</p>}
+        mode="edit"
+        sidebarCollapsed={false}
+        onModeChange={vi.fn()}
+        onSidebarCollapsedChange={vi.fn()}
+      />
+    );
+
+    const pane = container.querySelector<HTMLElement>('.workspace-main-split');
+    expect(pane).not.toBeNull();
+    Object.defineProperty(pane, 'clientWidth', { configurable: true, value: 400 });
+    fireEvent(window, new Event('resize'));
+
+    const previewSafeEditorWidth = (400 - 12 - 320) / 400 * 100;
+    const editorDivider = screen.getByRole('separator', { name: 'Editor width' });
+    expect(Number(editorDivider.getAttribute('aria-valuenow'))).toBeCloseTo(previewSafeEditorWidth, 4);
+    expect(Number(editorDivider.getAttribute('aria-valuemin'))).toBeCloseTo(previewSafeEditorWidth, 4);
+    expect(Number(editorDivider.getAttribute('aria-valuemax'))).toBeCloseTo(previewSafeEditorWidth, 4);
+    expect(screen.getByLabelText('Preview pane')).toHaveStyle({ flexShrink: '0', minWidth: '320px' });
+  });
+
   it('updates the desktop region sizes without replacing mounted panel children', () => {
     render(
       <AppShell

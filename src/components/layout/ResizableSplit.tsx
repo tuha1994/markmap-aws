@@ -1,6 +1,7 @@
 import { useEffect, useState, type KeyboardEvent, type PointerEvent } from 'react';
 
 export type ResizeDirection = 'horizontal' | 'vertical';
+type ResizeValueUnit = 'pixels' | 'percent';
 
 type ResizableSplitProps = {
   direction: ResizeDirection;
@@ -9,6 +10,7 @@ type ResizableSplitProps = {
   max: number;
   defaultValue: number;
   value?: number;
+  valueUnit?: ResizeValueUnit;
   step?: number;
   onValueChange(value: number): void;
 };
@@ -17,6 +19,7 @@ type ActivePointer = {
   id: number;
   origin: number;
   value: number;
+  contentSize: number;
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -47,6 +50,7 @@ export function ResizableSplit({
   max,
   defaultValue,
   value = defaultValue,
+  valueUnit = 'pixels',
   step = 1,
   onValueChange
 }: ResizableSplitProps) {
@@ -80,13 +84,22 @@ export function ResizableSplit({
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    setActivePointer({ id: event.pointerId, origin: isHorizontal ? event.clientX : event.clientY, value: currentValue });
+    setActivePointer({
+      id: event.pointerId,
+      origin: isHorizontal ? event.clientX : event.clientY,
+      value: currentValue,
+      contentSize: event.currentTarget.parentElement?.clientWidth ?? 0
+    });
   };
 
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     if (!activePointer || event.pointerId !== activePointer.id) return;
     const position = isHorizontal ? event.clientX : event.clientY;
-    setBoundedValue(activePointer.value + position - activePointer.origin);
+    const pixelDelta = position - activePointer.origin;
+    const valueDelta = valueUnit === 'percent'
+      ? activePointer.contentSize > 0 ? pixelDelta / activePointer.contentSize * 100 : 0
+      : pixelDelta;
+    setBoundedValue(activePointer.value + valueDelta);
   };
 
   const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {

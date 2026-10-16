@@ -72,9 +72,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .desktop-pane-layout { display: flex; align-items: stretch; max-width: 1600px; min-width: 0; margin: 0 auto; }
 .desktop-pane-layout > aside, .workspace-main-split > section { min-width: 0; padding: var(--workspace-space-2); background: var(--workspace-surface); border: 1px solid var(--workspace-border); border-radius: var(--workspace-radius-md); box-shadow: var(--workspace-shadow); }
 .desktop-pane-layout > aside { flex: 0 0 300px; background: var(--workspace-surface-elevated); }
-.workspace-main-split { display: flex; flex: 1 1 0; min-width: 320px; }
-.workspace-main-split > [data-workspace-panel='editor'] { flex: 0 1 39%; }
-.workspace-main-split > [data-workspace-panel='preview'] { flex: 1 1 0; min-width: 320px; }
+.workspace-main-split { display: flex; flex: 1 0 0; min-width: 0; }
+.workspace-main-split > [data-workspace-panel='editor'] { min-width: 0; }
+.workspace-main-split > [data-workspace-panel='preview'] { flex-shrink: 0; min-width: 320px; }
 .resizable-split { position: relative; z-index: 1; flex: 0 0 0.75rem; min-width: 0.75rem; margin: 0 -0.125rem; touch-action: none; cursor: col-resize; outline: none; }
 .resizable-split::before { position: absolute; top: 0.5rem; bottom: 0.5rem; left: 0.3125rem; width: 0.125rem; content: ''; background: var(--workspace-border); border-radius: 999px; transition: background-color 150ms ease, box-shadow 150ms ease; }
 .resizable-split:hover::before, .resizable-split:focus-visible::before, .resizable-split[data-active='true']::before { background: var(--workspace-accent); box-shadow: 0 0 0 0.25rem var(--workspace-accent-soft); }

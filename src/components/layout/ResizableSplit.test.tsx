@@ -78,6 +78,36 @@ describe('ResizableSplit', () => {
     expect(releasePointerCapture).toHaveBeenCalledWith(7);
   });
 
+  it('converts percentage drag pixels using the editor and preview content width', () => {
+    const onValueChange = vi.fn();
+    const { container } = render(
+      <div>
+        <ResizableSplit
+          direction="horizontal"
+          label="Editor width"
+          valueUnit="percent"
+          min={27}
+          max={62}
+          defaultValue={39}
+          value={39}
+          onValueChange={onValueChange}
+        />
+      </div>
+    );
+
+    const divider = screen.getByRole('separator', { name: 'Editor width' });
+    Object.defineProperties(divider, {
+      setPointerCapture: { value: vi.fn() },
+      releasePointerCapture: { value: vi.fn() }
+    });
+    Object.defineProperty(container.firstElementChild, 'clientWidth', { value: 1_000 });
+
+    fireEvent.pointerDown(divider, { pointerId: 9, clientX: 100 });
+    fireEvent.pointerMove(divider, { pointerId: 9, clientX: 123 });
+
+    expect(onValueChange).toHaveBeenLastCalledWith(41.3);
+  });
+
   it('does not render a focusable desktop divider outside desktop viewports', () => {
     setDesktopViewport(false);
     const { container } = render(
