@@ -27,7 +27,15 @@ npm run test:rules
 
 ## Browser E2E coverage
 
-`npm run test:e2e` builds the public bundle, scans it for sentinel secret/private-content strings, and runs headless Chromium checks at 1280px and 360px. The browser suite uses synthetic Markdown only and covers the protected direct entrypoint, native Markmap rendering/fit behavior, and a competing-page conflict harness. It does not require Firebase credentials or contact a production Firebase project.
+`npm run test:e2e` starts local Firebase Auth and Firestore Emulators, builds the application in `e2e` mode, serves that production build with `vite preview`, and runs headless Chromium. The browser suite uses real Auth Emulator email/password sessions only in the local emulator build; it does not bypass `AuthGate`, `AccessGate`, or Firestore Rules. It covers signed-in allow-list denial at a direct private entrypoint, an authorized 360px workspace's Maps/Edit/Preview panes, native Markmap rendering/fit behavior, and a real two-context versioned-save conflict resolved through `useSaveQueue`.
+
+For a cache-independent local/CI run, use:
+
+```bash
+npm run ci:e2e:clean
+```
+
+That command performs `npm ci`, runs `playwright install chromium` through `npm run test:e2e:install` with a project-local browser path, then runs the E2E suite. The emitted-asset check enumerates text assets against a deliberately small fixture vocabulary for obvious credential and AWS Partner/internal markers; it is not a universal secret scanner.
 
 Google popup sign-in cannot be safely automated without an approved non-production Firebase project and a privileged allow-list operator. Run that check manually only after obtaining approval: sign in with the Google popup against the approved test project, record the literal Authentication UID, create that UID's `authorizedUsers/{uid}` allow-list document out of band, then verify access and sign-out. Do not add test-project or production credentials to this repository.
 

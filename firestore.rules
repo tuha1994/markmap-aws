@@ -221,7 +221,7 @@ service cloud.firestore {
     }
 
     match /authorizedUsers/{uid} {
-      allow get: if approvedUid() && request.auth.uid == uid;
+      allow get: if request.auth != null && request.auth.uid == uid;
     }
 
     match /folders/{folderId} {

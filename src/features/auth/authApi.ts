@@ -1,12 +1,14 @@
 import {
   GoogleAuthProvider,
   onAuthStateChanged,
+  signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
   type User
 } from 'firebase/auth';
 
 import { getFirebaseClient } from '../../lib/firebase/client';
+import { localEmulatorCredentials, type LocalEmulatorAccount } from '../../lib/firebase/config';
 
 const googleProvider = new GoogleAuthProvider();
 const missingConfigurationMessage = 'Firebase configuration is unavailable. Check the deployment configuration and retry.';
@@ -52,6 +54,14 @@ export async function signInWithGoogle(): Promise<void> {
 
     throw new Error('Google sign-in failed. Please retry.');
   }
+}
+
+export async function signInWithLocalEmulator(account: LocalEmulatorAccount): Promise<void> {
+  const credentials = localEmulatorCredentials?.[account];
+  if (!credentials) {
+    throw new Error('Local emulator sign-in is unavailable.');
+  }
+  await signInWithEmailAndPassword(getAuth(), credentials.email, credentials.password);
 }
 
 export async function signOutFromGoogle(): Promise<void> {

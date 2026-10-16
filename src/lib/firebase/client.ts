@@ -1,8 +1,8 @@
 import { getApp, getApps, initializeApp, type FirebaseOptions } from 'firebase/app';
-import { getAuth, type Auth } from 'firebase/auth';
-import { getFirestore, type Firestore } from 'firebase/firestore';
+import { connectAuthEmulator, getAuth, type Auth } from 'firebase/auth';
+import { connectFirestoreEmulator, getFirestore, type Firestore } from 'firebase/firestore';
 
-import { firebaseConfig } from './config';
+import { firebaseConfig, firebaseEmulatorConfig } from './config';
 
 export type FirebaseClient = {
   auth: Auth;
@@ -18,10 +18,13 @@ export function createFirebaseClient(config: FirebaseOptions | null): FirebaseCl
 
   const app = getApps().length === 0 ? initializeApp(config) : getApp();
 
-  return {
-    auth: getAuth(app),
-    firestore: getFirestore(app)
-  };
+  const auth = getAuth(app);
+  const firestore = getFirestore(app);
+  if (firebaseEmulatorConfig) {
+    connectAuthEmulator(auth, firebaseEmulatorConfig.authUrl, { disableWarnings: true });
+    connectFirestoreEmulator(firestore, firebaseEmulatorConfig.firestoreHost, firebaseEmulatorConfig.firestorePort);
+  }
+  return { auth, firestore };
 }
 
 export function getFirebaseClient(): FirebaseClient | null {

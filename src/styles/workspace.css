@@ -19,6 +19,8 @@ textarea { display: block; width: 100%; min-height: 60vh; margin-top: 0.5rem; re
 .map-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
 .map-actions [role='dialog'] { position: fixed; z-index: 2; inset: auto 1rem 1rem; max-width: 30rem; padding: 1rem; background: #fff; border: 1px solid #687386; box-shadow: 0 8px 24px rgb(0 0 0 / 20%); }
 .map-actions [role='dialog'] input { display: block; width: 100%; margin: 0.5rem 0 1rem; }
+.conflict-dialog-overlay { position: fixed; z-index: 10; inset: 0; display: grid; place-items: center; padding: 1rem; background: rgb(0 0 0 / 45%); }
+.conflict-dialog-panel { width: min(42rem, 100%); max-height: calc(100vh - 2rem); overflow: auto; padding: 1rem; background: #fff; border: 1px solid #687386; border-radius: 0.5rem; box-shadow: 0 8px 24px rgb(0 0 0 / 30%); }
 
 @media (max-width: 720px) {
   .app-shell { padding: 0; }

@@ -8,11 +8,13 @@
     "build": "vite build",
     "test": "vitest run",
     "test:rules": "node scripts/run-rules-tests.mjs",
-    "test:e2e": "npm run build && playwright test",
+    "test:e2e": "node scripts/run-e2e.mjs",
+    "test:e2e:install": "node scripts/install-playwright-chromium.mjs",
     "test:all": "npm run test && npm run test:rules && npm run test:e2e",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "ci:install": "npm ci"
+    "ci:install": "npm ci",
+    "ci:e2e:clean": "npm ci && npm run test:e2e:install && npm run test:e2e"
   },
   "dependencies": {
     "firebase": "13.0.0",

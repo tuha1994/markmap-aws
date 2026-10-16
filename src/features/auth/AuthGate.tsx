@@ -1,6 +1,8 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 
 import { useAuth } from './AuthProvider';
+import { signInWithLocalEmulator } from './authApi';
+import { localEmulatorCredentials } from '../../lib/firebase/config';
 
 export function AuthGate({
   children,
@@ -37,6 +39,16 @@ export function AuthGate({
       <button type="button" onClick={() => void signIn()}>
         Continue with Google
       </button>
+      {localEmulatorCredentials ? (
+        <>
+          <button type="button" onClick={() => void signInWithLocalEmulator('approved')}>
+            Sign in as local approved test user
+          </button>
+          <button type="button" onClick={() => void signInWithLocalEmulator('denied')}>
+            Sign in as local denied test user
+          </button>
+        </>
+      ) : null}
     </main>
   );
 }
