@@ -18,8 +18,9 @@ export type ParsedMarkdownFile = {
 };
 
 export async function parseMarkdownFile(file: File): Promise<ParsedMarkdownFile> {
-  if (!file.name.toLocaleLowerCase().endsWith('.md')) {
-    throw new MarkdownImportError('Choose a Markdown file with a .md extension.');
+  const extension = file.name.match(/\.(?:markdown|md)$/i)?.[0];
+  if (!extension) {
+    throw new MarkdownImportError('Choose a Markdown file with a .md or .markdown extension.');
   }
   if (file.size > MARKDOWN_IMPORT_BYTE_LIMIT) {
     throw new MarkdownImportError('Markdown files must be 256 KiB or smaller.');
@@ -37,7 +38,7 @@ export async function parseMarkdownFile(file: File): Promise<ParsedMarkdownFile>
     throw new MarkdownImportError('Markdown files must be 256 KiB or smaller.');
   }
 
-  const title = (file.name.slice(0, -3).trim() || 'Imported map').normalize('NFC');
+  const title = (file.name.slice(0, -extension.length).trim() || 'Imported map').normalize('NFC');
   if (UNSAFE_TITLE_CHARACTERS.test(title)) {
     throw new MarkdownImportError('Imported map titles cannot contain control or bidirectional characters.');
   }

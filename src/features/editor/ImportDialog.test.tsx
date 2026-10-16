@@ -31,7 +31,7 @@ describe('ImportDialog', () => {
       target: { files: [markdownFile('private.txt', '# Not Markdown')] }
     });
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Choose a Markdown file with a .md extension.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Choose a Markdown file with a .md or .markdown extension.');
     expect(onImport).not.toHaveBeenCalled();
   });
 });

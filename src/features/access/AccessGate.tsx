@@ -5,6 +5,13 @@ import { getOwnAuthorization } from './accessRepository';
 
 type AccessPhase = 'checking' | 'allowed' | 'denied' | 'error';
 
+function isPermissionDenied(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === 'permission-denied';
+}
+
 export function AccessGate({
   children,
   onPrivateStateClear
@@ -53,13 +60,13 @@ export function AccessGate({
         onPrivateStateClear();
         setAccess({ phase: 'denied', uid });
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!active) {
           return;
         }
 
         onPrivateStateClear();
-        setAccess({ phase: 'error', uid });
+        setAccess({ phase: isPermissionDenied(error) ? 'denied' : 'error', uid });
       });
 
     return () => {

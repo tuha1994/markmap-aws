@@ -39,6 +39,20 @@ That command performs `npm ci`, runs `playwright install chromium` through `npm 
 
 Google popup sign-in cannot be safely automated without an approved non-production Firebase project and a privileged allow-list operator. Run that check manually only after obtaining approval: sign in with the Google popup against the approved test project, record the literal Authentication UID, create that UID's `authorizedUsers/{uid}` allow-list document out of band, then verify access and sign-out. Do not add test-project or production credentials to this repository.
 
+## CI, Pages artifact, and rollback
+
+`.github/workflows/ci.yml` runs on pull requests and `main` pushes. It uses `npm ci`, then linting, type checking, unit/integration tests, Firestore Rules tests, clean Chromium installation, headless E2E, and a Vite build. It has no Firebase production credentials or deployment step.
+
+`.github/workflows/deploy-pages.yml` is deliberately `workflow_dispatch` only. An authorized release operator supplies an approved commit SHA, tag, or branch in `approved_ref`; the workflow repeats quality gates, builds only `dist/`, and uploads it as a GitHub Pages artifact in the protected `github-pages` environment. It does not invoke `actions/deploy-pages`, change Firebase, enable App Check, or automatically deploy from `main`.
+
+Before the first approved artifact run, configure this repository's GitHub Pages source as **GitHub Actions** and protect the `github-pages` environment with the organization's required reviewers. The workflow runs with only `contents: read`, `pages: write`, and `id-token: write` permissions. GitHub's custom Pages workflow documentation describes `configure-pages`, `upload-pages-artifact`, and the protected environment/permissions required for a later deployment action.[1] The workflow uses the currently documented `actions/checkout@v6`, `actions/configure-pages@v5`, and `actions/upload-pages-artifact@v4` major versions.[1]
+
+### Deferred production release and rollback
+
+Production deployment remains outside this repository baseline. A separate release approval must identify the exact tested commit/artifact, target Pages environment, release operator, Firebase Rules version, App Check state, test UID/operator, and rollback target. Do not invoke `actions/deploy-pages` until that approval exists.
+
+For an approved rollback, identify the last known-good immutable commit SHA or tag, re-run **Prepare GitHub Pages artifact** manually with that exact value in `approved_ref`, and obtain the same separate deployment authorization for the resulting artifact. Do not roll back by editing `main`, changing Firebase Rules, or enabling/disabling App Check. This procedure remains compatible with the Firebase Spark constraint because it uses static Pages artifacts and does not add a server or paid Firebase service.
+
 ## Privileged first UID grant runbook
 
 The browser application cannot grant its own access. A privileged Firebase project operator performs the first grant only after the intended user has signed in with Google once in the approved Firebase project:
@@ -56,3 +70,7 @@ The browser application cannot grant its own access. A privileged Firebase proje
 4. Have the user refresh or re-authenticate. Only an existing record with `enabled: true` permits browser data access.
 
 To revoke access, the privileged operator sets `enabled` to `false` (or removes the record) outside the browser app. Browser clients cannot list, create, update, or delete `authorizedUsers` documents.
+
+## Sources
+
+[1] https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages

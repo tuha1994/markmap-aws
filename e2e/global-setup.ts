@@ -26,7 +26,7 @@ async function createAuthUser(email: string, password: string): Promise<AuthUser
 
 export default async function globalSetup() {
   const emailPassword = requiredEnvironment('VITE_E2E_AUTH_PASSWORD');
-  const [approved, denied] = await Promise.all([
+  const [approved, unapproved] = await Promise.all([
     createAuthUser(requiredEnvironment('VITE_E2E_APPROVED_EMAIL'), emailPassword),
     createAuthUser(requiredEnvironment('VITE_E2E_DENIED_EMAIL'), emailPassword)
   ]);
@@ -61,5 +61,5 @@ export default async function globalSetup() {
     });
   });
   await testEnvironment.cleanup();
-  if (!denied.localId) throw new Error('The allow-list-denied Auth Emulator user was not created.');
+  if (!unapproved.localId) throw new Error('The unapproved Auth Emulator user was not created.');
 }

@@ -7,9 +7,12 @@ function markdownFile(name: string, markdown: string, type = 'text/markdown'): F
 }
 
 describe('parseMarkdownFile', () => {
-  it('accepts UTF-8 .md input within the byte limit and derives its title', async () => {
-    await expect(parseMarkdownFile(markdownFile('Architecture Plan.md', '# Architecture\n\né'))).resolves.toEqual({
-      title: 'Architecture Plan',
+  it.each([
+    ['Architecture Plan.md', 'Architecture Plan'],
+    ['Architecture Plan.MARKDOWN', 'Architecture Plan']
+  ])('accepts UTF-8 %s input within the byte limit and derives its title', async (name, title) => {
+    await expect(parseMarkdownFile(markdownFile(name, '# Architecture\n\né'))).resolves.toEqual({
+      title,
       markdown: '# Architecture\n\né'
     });
   });

@@ -44,7 +44,7 @@ export function ImportDialog({ onImport, onCancel, busy = false }: Props) {
         <input
           aria-label="Markdown file"
           type="file"
-          accept=".md,text/markdown"
+          accept=".md,.markdown,text/markdown"
           disabled={disabled}
           onChange={(event) => void selectFile(event.target.files?.[0] ?? null)}
         />

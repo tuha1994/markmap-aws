@@ -21,7 +21,7 @@ async function signInToLocalWorkspace(page: Page, account: 'approved' | 'denied'
   await page.getByRole('button', { name: `Sign in as local ${account} test user` }).click();
 }
 
-test('denies a signed-in allow-list-denied user at a direct private entrypoint without rendering private map content at 1280px', async ({ page }) => {
+test('renders access denial after a signed-in unapproved user is denied their authorization-record read at a direct private entrypoint without rendering private map content at 1280px', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('./private');
 

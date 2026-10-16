@@ -1,0 +1,81 @@
+name: Prepare GitHub Pages artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      approved_ref:
+        description: Approved commit SHA, tag, or branch to build for release or rollback
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages-artifact
+  cancel-in-progress: true
+
+jobs:
+  build-and-upload:
+    name: Build and upload guarded Pages artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: "0"
+      VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
+      VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+      VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+      VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
+    steps:
+      - name: Check out approved ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.approved_ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Set up Java for Firebase Emulator
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install Chromium for headless E2E
+        run: npm run test:e2e:install
+
+      - name: Verify quality gates before artifact upload
+        run: |
+          npm run lint
+          npm run typecheck
+          npm run test:all
+
+      - name: Build static site
+        run: npm run build
+
+      - name: Configure GitHub Pages metadata without enablement
+        uses: actions/configure-pages@v5
+        with:
+          enablement: false
+
+      - name: Upload dist as the Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+      - name: Hold deployment for separate release approval
+        run: |
+          echo "Pages artifact uploaded for approved ref: ${{ inputs.approved_ref }}"
+          echo "This workflow intentionally does not invoke actions/deploy-pages."
+          echo "Production deployment requires separate release authorization."

@@ -75,11 +75,19 @@ describe('authorizedUsers Firestore Rules', () => {
     await assertFails(getDoc(doc(approvedDb, 'authorizedUsers', 'another-approved-user')));
   });
 
-  it('allows a signed-in unapproved user to get only their own missing record so AccessGate can deny access', async () => {
-    const unapprovedDb = testEnv.authenticatedContext('unapproved-user').firestore();
+  it.each([
+    ['absent', false],
+    ['disabled', true]
+  ])('denies a signed-in %s user from getting their own authorization record', async (_state, seedDisabledRecord) => {
+    const uid = `${_state}-user`;
+    if (seedDisabledRecord) {
+      await seedAuthorizedUser(uid, false);
+    }
 
-    await assertSucceeds(getDoc(doc(unapprovedDb, 'authorizedUsers', 'unapproved-user')));
-    await assertFails(getDoc(doc(unapprovedDb, 'authorizedUsers', approvedUid)));
+    const database = testEnv.authenticatedContext(uid).firestore();
+
+    await assertFails(getDoc(doc(database, 'authorizedUsers', uid)));
+    await assertFails(getDoc(doc(database, 'authorizedUsers', approvedUid)));
   });
 
   it('denies browser list/create/update/delete access to authorizedUsers', async () => {

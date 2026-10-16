@@ -93,6 +93,18 @@ describe('App auth and access composition', () => {
     mockedGetOwnAuthorization.mockResolvedValue({ enabled: true } as never);
   });
 
+  it('renders access denial when the signed-in user is denied their authorization-record read', async () => {
+    const onPrivateStateClear = vi.fn();
+    mockedGetOwnAuthorization.mockRejectedValue({ code: 'permission-denied' });
+
+    render(<ComposedGates onPrivateStateClear={onPrivateStateClear} />);
+
+    await screen.findByText('This account has not been granted access.');
+    expect(screen.queryByText('Access could not be verified. Please retry.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('main', { name: 'Markmap AWS workspace' })).not.toBeInTheDocument();
+    expect(onPrivateStateClear).toHaveBeenCalledTimes(1);
+  });
+
   it('cleans the private-state boundary when an allowed user signs out after private UI rendered', async () => {
     const onPrivateStateClear = vi.fn();
     const view = render(<ComposedGates onPrivateStateClear={onPrivateStateClear} />);

@@ -27,3 +27,7 @@ map-exports/
 internal-content/
 private-content/
 aws-partner-internal/
+
+# Local browser-test output
+playwright-report/
+test-results/
