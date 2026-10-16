@@ -240,12 +240,23 @@ export function PrivateWorkspace() {
 
   return (
     <main aria-label="Markmap AWS workspace">
-      <header className="workspace-header">
-        <h1>{selectedMap?.title ?? 'Private workspace'}</h1>
-        <SaveStatus status={saveStatus} onRetry={['error', 'prunePending'].includes(saveStatus) ? retryActiveSave : undefined} />
-        {operationError ? <p role="alert">The map action could not be completed.</p> : null}
-        <button type="button" disabled={saveStatus !== 'saved'} onClick={() => setImportOpen(true)}>Import Markdown</button>
-        <button type="button" onClick={() => void signOut()}>Sign out</button>
+      <header className="workspace-header" aria-label="Workspace header">
+        <div className="workspace-brand" aria-label="Markmap AWS">
+          <span className="workspace-brand-mark" aria-hidden="true">M</span>
+          <span className="workspace-brand-name">Markmap AWS</span>
+        </div>
+        <div className="workspace-map-context" aria-label="Active map">
+          <p className="workspace-breadcrumb">Private workspace</p>
+          <h1>{selectedMap?.title ?? 'Private workspace'}</h1>
+        </div>
+        <div className="workspace-header-status" data-save-status={saveStatus}>
+          <SaveStatus status={saveStatus} onRetry={['error', 'prunePending'].includes(saveStatus) ? retryActiveSave : undefined} />
+        </div>
+        {operationError ? <p className="workspace-operation-alert" role="alert">The map action could not be completed.</p> : null}
+        <div className="workspace-header-actions" aria-label="Workspace actions">
+          <button type="button" disabled={saveStatus !== 'saved'} onClick={() => setImportOpen(true)}>Import Markdown</button>
+          <button type="button" onClick={() => void signOut()}>Sign out</button>
+        </div>
       </header>
       <MapWorkspace sidebar={sidebar} map={selectedMap} database={client.firestore} onStatus={handleSaveStatus} onRetryChange={handleSaveRetryChange} />
       {importOpen ? <ImportDialog onImport={importMap} onCancel={() => setImportOpen(false)} /> : null}

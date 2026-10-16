@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -6,6 +7,7 @@ import { moveMapsAndArchiveFolder, subscribeFolders } from '../features/folders/
 import { createRevisionAndSaveMap, listRevisions } from '../features/history/revisionRepository';
 import { archiveMindMap, createMindMap, updateMindMapVersioned } from '../features/mindmaps/mindMapRepository';
 import { PrivateWorkspace } from './App';
+const workspaceStyles = readFileSync('src/styles/workspace.css', 'utf8');
 
 const auth = vi.hoisted(() => ({ current: null as unknown }));
 const mapList = vi.hoisted(() => ({ current: null as unknown }));
@@ -72,6 +74,29 @@ describe('PrivateWorkspace', () => {
       return vi.fn();
     });
     mockedMoveMapsAndArchiveFolder.mockResolvedValue({ status: 'archived' });
+  });
+
+  it('presents the Option B product, active map, save status, and account controls in the workspace header', () => {
+    render(<PrivateWorkspace />);
+
+    const header = screen.getByRole('banner', { name: 'Workspace header' });
+    expect(within(header).getByText('Markmap AWS')).toBeInTheDocument();
+    expect(within(header).getByLabelText('Active map')).toHaveTextContent('Architecture');
+    expect(within(header).getByRole('heading', { name: 'Architecture' })).toBeInTheDocument();
+    const saveStatus = within(header).getByRole('region', { name: 'Save status' });
+    expect(saveStatus).toHaveTextContent('Saved');
+    expect(saveStatus.parentElement).toHaveAttribute('data-save-status', 'saved');
+    expect(within(header).getByRole('button', { name: 'Import Markdown' })).toBeEnabled();
+    expect(within(header).getByRole('button', { name: 'Sign out' })).toBeEnabled();
+    expect(within(header).getByLabelText('Workspace actions')).toBeInTheDocument();
+  });
+
+  it('defines Option B surface, accent, and status tokens for the workspace shell', () => {
+    expect(workspaceStyles).toContain('--workspace-canvas: #f5f7fb');
+    expect(workspaceStyles).toContain('--workspace-surface-elevated: #ffffff');
+    expect(workspaceStyles).toContain('--workspace-accent: #4f46e5');
+    expect(workspaceStyles).toContain('--workspace-success: #087443');
+    expect(workspaceStyles).toContain('--workspace-error: #b42318');
   });
 
   it('lets an approved user create, select, rename, and archive an owned map', () => {
