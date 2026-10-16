@@ -38,10 +38,10 @@ export function MapActions({ mapTitle, onCreate, onRename, onArchive, disabled =
   }
 
   return (
-    <div className="map-actions" aria-label="Map actions">
-      <button type="button" disabled={disabled} onClick={() => open('create')}>Create map</button>
+    <div className="map-actions" role="toolbar" aria-label="Map actions">
+      <button className="map-actions-create" type="button" disabled={disabled} onClick={() => open('create')}>Create map</button>
       <button type="button" disabled={disabled || !mapTitle} onClick={() => open('rename')}>Rename map</button>
-      <button type="button" disabled={disabled || !mapTitle} onClick={() => open('archive')}>Archive map</button>
+      <button className="map-actions-archive" type="button" disabled={disabled || !mapTitle} onClick={() => open('archive')}>Archive map</button>
 
       {dialog === 'create' || dialog === 'rename' ? (
         <section role="dialog" aria-modal="true" aria-label={dialog === 'create' ? 'Create map' : `Rename ${mapTitle}?`}>

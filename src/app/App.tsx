@@ -101,7 +101,20 @@ function SelectedMapWorkspace({ sidebar, map, database, layout, onStatus, onRetr
   }
 
   const history = <VersionHistoryPanel revisions={revisions} onRestore={setRevisionToRestore} onSaveVersion={queue.saveVersion} />;
-  const editor = <><MarkdownEditor value={queue.draft} onChange={queue.setDraft} /><button type="button" onClick={() => downloadMarkdown(map.title, queue.draft)}>Export Markdown</button></>;
+  const editor = (
+    <div className="workspace-editor-content">
+      <div className="workspace-panel-heading">
+        <div>
+          <p className="workspace-panel-eyebrow">Author</p>
+          <h2>Markdown</h2>
+        </div>
+        <div className="workspace-editor-toolbar" role="toolbar" aria-label="Editor controls">
+          <button type="button" onClick={() => downloadMarkdown(map.title, queue.draft)}>Export Markdown</button>
+        </div>
+      </div>
+      <MarkdownEditor value={queue.draft} onChange={queue.setDraft} />
+    </div>
+  );
   const preview = <MarkmapPreview markdown={queue.draft} isFocusMode={layout.mode === 'focus'} onToggleFocus={() => layout.setMode(layout.mode === 'focus' ? 'edit' : 'focus')} />;
   return <>
     {restoreError ? <p role="alert">The revision could not be restored.</p> : null}
@@ -239,7 +252,14 @@ export function PrivateWorkspace() {
   if (loading) return <main aria-label="Markmap AWS workspace"><WorkspaceFeedback kind="loading" /></main>;
   if (error || !client) return <main aria-label="Markmap AWS workspace"><WorkspaceFeedback kind="error" /></main>;
 
-  const sidebar = <><FolderSidebar folders={folders} maps={maps} onArchive={setPendingFolderId} archiveDisabled={saveStatus !== 'saved'} /><MapActions mapTitle={selectedMap?.title} onCreate={createMap} onRename={renameMap} onArchive={archiveMap} disabled={saveStatus !== 'saved'} /><MapSearch maps={maps} onSelect={selectMap} /><MapList maps={maps} selectedMapId={selectedMapId} onSelect={selectMap} /></>;
+  const sidebar = (
+    <div className="workspace-sidebar-content">
+      <FolderSidebar folders={folders} maps={maps} onArchive={setPendingFolderId} archiveDisabled={saveStatus !== 'saved'} />
+      <MapActions mapTitle={selectedMap?.title} onCreate={createMap} onRename={renameMap} onArchive={archiveMap} disabled={saveStatus !== 'saved'} />
+      <MapSearch maps={maps} onSelect={selectMap} />
+      <MapList maps={maps} selectedMapId={selectedMapId} onSelect={selectMap} />
+    </div>
+  );
 
   return (
     <main aria-label="Markmap AWS workspace" data-workspace-theme={layout.theme}>

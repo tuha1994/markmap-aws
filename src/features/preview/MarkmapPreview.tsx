@@ -53,8 +53,14 @@ export function MarkmapPreview({ markdown, createAdapter = createMarkmapAdapter,
   }, [markdown, adapter]);
 
   return (
-    <section aria-label="Mind map preview">
-      <PreviewToolbar adapter={adapter} isFocusMode={isFocusMode} onToggleFocus={onToggleFocus} />
+    <section className="markmap-preview" aria-label="Mind map preview">
+      <div className="workspace-panel-heading markmap-preview-heading">
+        <div>
+          <p className="workspace-panel-eyebrow">Explore</p>
+          <h2>Mind map</h2>
+        </div>
+        <PreviewToolbar adapter={adapter} isFocusMode={isFocusMode} onToggleFocus={onToggleFocus} />
+      </div>
       {error ? <p role="alert">Unable to render preview</p> : null}
       <svg ref={svgRef} aria-label="Markmap preview" />
     </section>

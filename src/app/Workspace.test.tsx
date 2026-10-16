@@ -11,6 +11,12 @@ const workspaceStyles = readFileSync('src/styles/workspace.css', 'utf8');
 
 const auth = vi.hoisted(() => ({ current: null as unknown }));
 const mapList = vi.hoisted(() => ({ current: null as unknown }));
+const previewAdapter = vi.hoisted(() => ({
+  fit: vi.fn(),
+  zoomIn: vi.fn(),
+  zoomOut: vi.fn(),
+  reset: vi.fn()
+}));
 
 vi.mock('../features/auth/AuthProvider', () => ({
   useAuth: () => auth.current
@@ -42,12 +48,12 @@ vi.mock('../features/history/revisionRepository', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../features/history/revisionRepository')>();
   return { ...actual, createRevisionAndSaveMap: vi.fn(), listRevisions: vi.fn(), restoreRevision: vi.fn() };
 });
-vi.mock('../features/preview/MarkmapPreview', () => ({
-  MarkmapPreview: ({ isFocusMode, onToggleFocus }: { isFocusMode?: boolean; onToggleFocus?: () => void }) => (
-    <section aria-label="Mind map preview">
-      <button type="button" onClick={onToggleFocus}>{isFocusMode ? 'Exit focus mode' : 'Enter focus mode'}</button>
-    </section>
-  )
+vi.mock('../features/preview/markmapAdapter', () => ({
+  createMarkmapAdapter: vi.fn(() => ({
+    render: vi.fn().mockResolvedValue(undefined),
+    destroy: vi.fn(),
+    ...previewAdapter
+  }))
 }));
 
 const mockedCreateMindMap = vi.mocked(createMindMap);
@@ -65,6 +71,10 @@ function signedIn() {
 describe('PrivateWorkspace', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    previewAdapter.fit.mockClear();
+    previewAdapter.zoomIn.mockClear();
+    previewAdapter.zoomOut.mockClear();
+    previewAdapter.reset.mockClear();
     window.localStorage.clear();
     auth.current = signedIn();
     const map = { ...makeMindMap({ title: 'Architecture' }), id: 'map-1' };
@@ -102,6 +112,10 @@ describe('PrivateWorkspace', () => {
     expect(workspaceStyles).toContain('--workspace-accent: #4f46e5');
     expect(workspaceStyles).toContain('--workspace-success: #087443');
     expect(workspaceStyles).toContain('--workspace-error: #b42318');
+  });
+
+  it('uses theme-safe tokens for compact primary panel actions', () => {
+    expect(workspaceStyles).toMatch(/\.preview-focus-button, \.map-actions-create \{ color: var\(--workspace-surface\);/);
   });
 
   it('keeps the semantic save status visible with a compact tablet treatment', () => {
@@ -348,6 +362,41 @@ describe('PrivateWorkspace', () => {
     expect(mockedCreateRevisionAndSaveMap).toHaveBeenLastCalledWith({}, expect.objectContaining({ reason: 'manual' }));
     expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Saved');
     vi.useRealTimers();
+  });
+
+  it('keeps map, search, history, and export actions in their Edit-mode slots', () => {
+    render(<PrivateWorkspace />);
+
+    const navigation = screen.getByRole('complementary', { name: 'Workspace navigation' });
+    expect(within(navigation).getByRole('button', { name: 'Create map' })).toBeEnabled();
+    expect(within(navigation).getByRole('button', { name: 'Rename map' })).toBeEnabled();
+    expect(within(navigation).getByRole('button', { name: 'Archive map' })).toBeEnabled();
+    expect(within(navigation).getByLabelText('Private map search')).toBeInTheDocument();
+    expect(within(navigation).getByRole('button', { name: 'Save version' })).toBeEnabled();
+
+    const editor = screen.getByRole('region', { name: 'Markdown editor' });
+    expect(within(editor).getByRole('textbox', { name: 'Markdown' })).toBeEnabled();
+    expect(within(editor).getByRole('toolbar', { name: 'Editor controls' })).toContainElement(
+      within(editor).getByRole('button', { name: 'Export Markdown' })
+    );
+  });
+
+  it('keeps native Markmap controls and the Focus-mode exit action reachable in the preview toolbar', () => {
+    render(<PrivateWorkspace />);
+    fireEvent.click(screen.getByRole('button', { name: 'Focus mode' }));
+
+    const preview = screen.getByRole('region', { name: 'Preview pane' });
+    const previewToolbar = within(preview).getByRole('toolbar', { name: 'Preview controls' });
+    fireEvent.click(within(previewToolbar).getByRole('button', { name: 'Fit preview' }));
+    fireEvent.click(within(previewToolbar).getByRole('button', { name: 'Zoom in' }));
+    fireEvent.click(within(previewToolbar).getByRole('button', { name: 'Zoom out' }));
+    fireEvent.click(within(previewToolbar).getByRole('button', { name: 'Reset preview' }));
+
+    expect(previewAdapter.fit).toHaveBeenCalledOnce();
+    expect(previewAdapter.zoomIn).toHaveBeenCalledOnce();
+    expect(previewAdapter.zoomOut).toHaveBeenCalledOnce();
+    expect(previewAdapter.reset).toHaveBeenCalledOnce();
+    expect(within(previewToolbar).getByRole('button', { name: 'Exit focus mode' })).toBeEnabled();
   });
 
   it('persists theme choice and hides the desktop sidebar and editor without unmounting them in focus mode', () => {
