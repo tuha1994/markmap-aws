@@ -10,6 +10,7 @@ type Props = {
 
 export function ConflictDialog({ localMarkdown, remoteMarkdown, onResolve }: Props) {
   const keepMineRef = useRef<HTMLButtonElement>(null);
+  const useRemoteRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     keepMineRef.current?.focus();
@@ -22,10 +23,20 @@ export function ConflictDialog({ localMarkdown, remoteMarkdown, onResolve }: Pro
       aria-modal="true"
       aria-labelledby="conflict-title"
       onKeyDown={(event) => {
-        if (event.key === 'Escape') event.preventDefault();
-        if (event.key === 'Tab' && event.currentTarget.contains(document.activeElement)) {
+        if (event.key === 'Escape') {
           event.preventDefault();
+          return;
+        }
+        if (event.key !== 'Tab') return;
+
+        event.preventDefault();
+        if (event.shiftKey) {
+          if (document.activeElement === keepMineRef.current) useRemoteRef.current?.focus();
+          else keepMineRef.current?.focus();
+        } else if (document.activeElement === useRemoteRef.current) {
           keepMineRef.current?.focus();
+        } else {
+          useRemoteRef.current?.focus();
         }
       }}
     >
@@ -41,7 +52,7 @@ export function ConflictDialog({ localMarkdown, remoteMarkdown, onResolve }: Pro
           <pre>{remoteMarkdown}</pre>
         </section>
         <button ref={keepMineRef} type="button" onClick={() => onResolve('keepMine')}>Keep mine</button>
-        <button type="button" onClick={() => onResolve('useRemote')}>Use remote</button>
+        <button ref={useRemoteRef} type="button" onClick={() => onResolve('useRemote')}>Use remote</button>
       </div>
     </section>
   );
