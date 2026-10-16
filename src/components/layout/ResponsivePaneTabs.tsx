@@ -1,11 +1,12 @@
 import { useEffect, useId, useState, type ReactNode } from 'react';
 
 type Pane = 'maps' | 'editor' | 'preview';
+type PreviewContent = ReactNode | ((selectPreview: () => void) => ReactNode);
 
 type Props = {
   maps: ReactNode;
   editor: ReactNode;
-  preview: ReactNode;
+  preview: PreviewContent;
   focusMode?: boolean;
 };
 
@@ -34,7 +35,8 @@ export function ResponsivePaneTabs({ maps, editor, preview, focusMode = false }:
     target.closest('[role="tablist"]')?.querySelector<HTMLButtonElement>(`#${prefix}-${nextPane.id}-tab`)?.focus();
   }
 
-  const content = { maps, editor, preview }[activePane];
+  const previewContent = typeof preview === 'function' ? preview(() => setActivePane('preview')) : preview;
+  const content = { maps, editor, preview: previewContent }[activePane];
 
   return (
     <section className="mobile-pane-tabs" aria-label="Workspace panes">

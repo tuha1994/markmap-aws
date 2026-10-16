@@ -184,7 +184,7 @@ main[data-workspace-theme='dark'] {
   .mobile-pane-tabs [role='tabpanel'] { padding: var(--workspace-space-2); }
   .workspace-header { grid-template-columns: auto minmax(0, 1fr); gap: 0.75rem; min-height: auto; }
   .workspace-header-actions { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); }
-  .workspace-layout-toolbar { padding: 0 var(--workspace-space-2); }
+  .workspace-editor-toolbar button, .preview-toolbar button, .map-actions button { min-width: 2.75rem; min-height: 2.75rem; }
   .workspace-header-actions button { min-height: 2.75rem; }
   .workspace-operation-alert { grid-column: 1 / -1; }
 }

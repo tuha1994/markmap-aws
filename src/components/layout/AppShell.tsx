@@ -47,7 +47,17 @@ export function AppShell({
   const [editorWidth, setEditorWidth] = useState(EDITOR_DEFAULT);
   const mainSplitRef = useRef<HTMLDivElement>(null);
   const [mainSplitWidth, setMainSplitWidth] = useState(0);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia?.('(max-width: 720px)').matches === true);
   const isFocusMode = mode === 'focus';
+
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const mobileMedia = window.matchMedia('(max-width: 720px)');
+    const updateMobileViewport = () => setIsMobile(mobileMedia.matches);
+    updateMobileViewport();
+    mobileMedia.addEventListener('change', updateMobileViewport);
+    return () => mobileMedia.removeEventListener('change', updateMobileViewport);
+  }, []);
 
   useEffect(() => {
     const measure = () => setMainSplitWidth(mainSplitRef.current?.clientWidth ?? 0);
@@ -69,7 +79,7 @@ export function AppShell({
 
   return (
     <div className="app-shell" data-workspace-mode={mode} data-sidebar-collapsed={sidebarCollapsed}>
-      <div className="workspace-layout-toolbar" aria-label="Workspace layout controls">
+      {isMobile ? null : <div className="workspace-layout-toolbar" aria-label="Workspace layout controls">
         <div role="group" aria-label="Workspace mode">
           <button type="button" aria-pressed={!isFocusMode} onClick={() => onModeChange('edit')}>Edit mode</button>
           <button type="button" aria-pressed={isFocusMode} onClick={() => onModeChange('focus')}>Focus mode</button>
@@ -77,7 +87,7 @@ export function AppShell({
         <button type="button" onClick={() => onSidebarCollapsedChange(!sidebarCollapsed)}>
           {sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
         </button>
-      </div>
+      </div>}
       <div className="desktop-pane-layout">
         <aside data-workspace-panel="sidebar" aria-label="Workspace navigation" hidden={sidebarHidden} style={{ flexBasis: `${sidebarWidth}px` }}>{sidebar}</aside>
         {!sidebarHidden ? <ResizableSplit

@@ -70,6 +70,18 @@ async function dragDividerToExtreme(page: Page, divider: ReturnType<Page['getByR
   await page.mouse.up();
 }
 
+async function expectMobileToolbarTargets(toolbar: ReturnType<Page['getByRole']>) {
+  const controls = toolbar.getByRole('button');
+  const count = await controls.count();
+  expect(count).toBeGreaterThan(0);
+  for (let index = 0; index < count; index += 1) {
+    const box = await controls.nth(index).boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+}
+
 test('renders access denial after a signed-in unapproved user is denied their authorization-record read at a direct private entrypoint without rendering private map content at 1280px', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('./private');
@@ -80,24 +92,32 @@ test('renders access denial after a signed-in unapproved user is denied their au
   await expect(page.getByRole('main', { name: 'Markmap AWS workspace' })).toHaveCount(0);
 });
 
-test('keeps the authorized workspace Maps, Edit, and Preview panes operable at 360px without desktop focus controls or dividers', async ({ page }) => {
+test('keeps only mobile panes and 44px actions operable at 360px', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 800 });
   await page.goto('./');
 
   await signInToLocalWorkspace(page);
   await expect(page.getByRole('main', { name: 'Markmap AWS workspace' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Focus mode' })).toBeHidden();
+  await expect(page.locator('.workspace-layout-toolbar')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^(Edit mode|Focus mode|Show sidebar|Hide sidebar)$/ })).toHaveCount(0);
   await expect(page.getByRole('separator')).toHaveCount(0);
 
   await page.getByRole('tab', { name: 'Maps' }).click();
   await expect(page.getByRole('tabpanel')).toContainText('E2E workspace map');
+  await expectMobileToolbarTargets(page.getByRole('toolbar', { name: 'Map actions' }));
+
   await page.getByRole('tab', { name: 'Edit' }).click();
   await expect(page.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# E2E workspace map');
+  await expectMobileToolbarTargets(page.getByRole('toolbar', { name: 'Editor controls' }));
+
   await page.getByRole('tab', { name: 'Preview' }).click();
   await expect(page.getByRole('img', { name: 'Markmap preview' }).locator('.markmap-node')).toHaveCount(1);
-  await page.getByRole('button', { name: 'Enter focus mode' }).click();
+  const previewToolbar = page.getByRole('toolbar', { name: 'Preview controls' });
+  await expectMobileToolbarTargets(previewToolbar);
+  await previewToolbar.getByRole('button', { name: 'Enter focus mode' }).click();
   await expect(page.getByRole('tab', { name: 'Preview' })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('button', { name: 'Exit focus mode' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Exit focus mode' })).toHaveCount(0);
+  await expect(page.locator('.workspace-layout-toolbar')).toHaveCount(0);
 });
 
 test('uses real pointer drags to keep desktop workspace panels bounded and preserves an unsaved focus draft', async ({ page }) => {

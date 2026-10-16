@@ -119,7 +119,7 @@ function SelectedMapWorkspace({ sidebar, map, database, layout, onStatus, onRetr
   return <>
     {restoreError ? <p role="alert">The revision could not be restored.</p> : null}
     <AppShell sidebar={<>{sidebar}{history}</>} editor={editor} preview={preview} mode={layout.mode} sidebarCollapsed={layout.sidebarCollapsed} onModeChange={layout.setMode} onSidebarCollapsedChange={layout.setSidebarCollapsed} />
-    <ResponsivePaneTabs maps={<>{sidebar}{history}</>} editor={editor} preview={preview} focusMode={layout.mode === 'focus'} />
+    <ResponsivePaneTabs maps={<>{sidebar}{history}</>} editor={editor} preview={(selectPreview) => <MarkmapPreview markdown={queue.draft} onToggleFocus={selectPreview} />} focusMode={layout.mode === 'focus'} />
     {queue.conflict ? <ConflictDialog {...queue.conflict} onResolve={queue.resolveConflict} /> : null}
     {revisionToRestore ? <RestoreRevisionDialog revision={revisionToRestore} onRestore={() => void confirmRestore()} onCancel={() => setRevisionToRestore(null)} busy={restoreBusy} /> : null}
   </>;
