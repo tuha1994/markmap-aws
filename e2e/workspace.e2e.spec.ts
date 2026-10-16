@@ -21,6 +21,55 @@ async function signInToLocalWorkspace(page: Page, account: 'approved' | 'denied'
   await page.getByRole('button', { name: `Sign in as local ${account} test user` }).click();
 }
 
+
+type EditorGeometry = {
+  editor: { x: number; width: number };
+  preview: { x: number; width: number };
+  splitWidth: number;
+};
+
+async function readEditorGeometry(editor: ReturnType<Page['getByLabel']>, previewPanel: ReturnType<Page['getByLabel']>): Promise<EditorGeometry> {
+  const [editorBox, previewBox, splitWidth] = await Promise.all([
+    editor.boundingBox(),
+    previewPanel.boundingBox(),
+    previewPanel.locator('..').evaluate((element) => element.clientWidth)
+  ]);
+  expect(editorBox).not.toBeNull();
+  expect(previewBox).not.toBeNull();
+  return {
+    editor: { x: editorBox!.x, width: editorBox!.width },
+    preview: { x: previewBox!.x, width: previewBox!.width },
+    splitWidth
+  };
+}
+
+function expectEditorGeometryAtLiveBound(geometry: EditorGeometry, bound: 'min' | 'max') {
+  const previewMinimum = 320;
+  const dividerWidth = 12;
+  const previewSafeMax = (geometry.splitWidth - dividerWidth - previewMinimum) / geometry.splitWidth * 100;
+  const effectiveMax = Math.min(62, Math.max(0, previewSafeMax));
+  const effectiveMin = Math.min(27, effectiveMax);
+  const editorPercent = geometry.editor.width / geometry.splitWidth * 100;
+  const expected = bound === 'min' ? effectiveMin : effectiveMax;
+
+  expect(geometry.preview.width).toBeGreaterThanOrEqual(previewMinimum);
+  expect(geometry.editor.x + geometry.editor.width).toBeLessThanOrEqual(geometry.preview.x);
+  expect(editorPercent).toBeGreaterThanOrEqual(effectiveMin - 0.75);
+  expect(editorPercent).toBeLessThanOrEqual(effectiveMax + 0.75);
+  expect(Math.abs(editorPercent - expected)).toBeLessThan(0.75);
+}
+
+async function dragDividerToExtreme(page: Page, divider: ReturnType<Page['getByRole']>, deltaX: number) {
+  const box = await divider.boundingBox();
+  expect(box).not.toBeNull();
+  const x = box!.x + box!.width / 2;
+  const y = box!.y + box!.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + deltaX, y, { steps: 8 });
+  await page.mouse.up();
+}
+
 test('renders access denial after a signed-in unapproved user is denied their authorization-record read at a direct private entrypoint without rendering private map content at 1280px', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('./private');
@@ -104,23 +153,20 @@ test('uses real pointer drags to keep desktop workspace panels bounded and prese
   expect(sidebarAtMinimum!.width).toBeLessThanOrEqual(420);
   await expect(sidebarDivider).toHaveAttribute('aria-valuenow', '224');
 
-  const editorBefore = await editor.boundingBox();
-  const editorDividerBox = await editorDivider.boundingBox();
-  expect(editorBefore).not.toBeNull();
-  expect(editorDividerBox).not.toBeNull();
+  await dragDividerToExtreme(page, editorDivider, -1000);
+  expectEditorGeometryAtLiveBound(await readEditorGeometry(editor, previewPanel), 'min');
 
-  await page.mouse.move(editorDividerBox!.x + editorDividerBox!.width / 2, editorDividerBox!.y + editorDividerBox!.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(editorDividerBox!.x + editorDividerBox!.width / 2 + 84, editorDividerBox!.y + editorDividerBox!.height / 2, { steps: 8 });
-  await page.mouse.up();
+  await dragDividerToExtreme(page, editorDivider, 1000);
+  expectEditorGeometryAtLiveBound(await readEditorGeometry(editor, previewPanel), 'max');
 
-  const [editorAfter, previewAfter] = await Promise.all([editor.boundingBox(), previewPanel.boundingBox()]);
-  expect(editorAfter).not.toBeNull();
-  expect(previewAfter).not.toBeNull();
-  expect(editorAfter!.width).toBeGreaterThan(editorBefore!.width + 65);
-  expect(previewAfter!.width).toBeGreaterThanOrEqual(320);
-  expect(editorAfter!.x + editorAfter!.width).toBeLessThanOrEqual(previewAfter!.x);
-  await expect(editorDivider).not.toHaveAttribute('aria-valuenow', '39');
+  await dragDividerToExtreme(page, sidebarDivider, 1000);
+  expectEditorGeometryAtLiveBound(await readEditorGeometry(editor, previewPanel), 'max');
+
+  await dragDividerToExtreme(page, editorDivider, -1000);
+  expectEditorGeometryAtLiveBound(await readEditorGeometry(editor, previewPanel), 'min');
+
+  await dragDividerToExtreme(page, editorDivider, 1000);
+  expectEditorGeometryAtLiveBound(await readEditorGeometry(editor, previewPanel), 'max');
 
   const draft = '# Focus-preserved E2E draft\n\n- exact local draft';
   const markdown = page.getByRole('textbox', { name: 'Markdown' });
