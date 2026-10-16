@@ -3,6 +3,16 @@ import { describe, expect, it, vi } from 'vitest';
 import { downloadMarkdown, sanitizeMarkdownFilename } from './exportMarkdown';
 
 describe('downloadMarkdown', () => {
+  it('falls back to a safe Windows-compatible basename for reserved or hostile titles', () => {
+    expect(sanitizeMarkdownFilename('CON')).toBe('mind-map.md');
+    expect(sanitizeMarkdownFilename('Quarter\u202Ecod.exe')).toBe('mind-map.md');
+    expect(sanitizeMarkdownFilename('Draft\u0000notes')).toBe('mind-map.md');
+  });
+
+  it('removes trailing Windows-invalid dots and spaces from an otherwise safe title', () => {
+    expect(sanitizeMarkdownFilename('Architecture. ')).toBe('Architecture.md');
+  });
+
   it('exports the exact current Markdown with a sanitized filename', async () => {
     const createObjectURL = vi.fn((blob: Blob) => {
       void blob;

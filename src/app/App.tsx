@@ -118,9 +118,14 @@ export function PrivateWorkspace() {
   const [pendingFolderId, setPendingFolderId] = useState<string | null>(null);
   const [folderOperationBusy, setFolderOperationBusy] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatusValue>('saved');
+  const saveStatusRef = useRef<SaveStatusValue>('saved');
   const [importOpen, setImportOpen] = useState(false);
   const saveRetry = useRef<(() => void) | null>(null);
   const [operationError, setOperationError] = useState(false);
+  const handleSaveStatus = useCallback((status: SaveStatusValue) => {
+    saveStatusRef.current = status;
+    setSaveStatus(status);
+  }, []);
   const handleSaveRetryChange = useCallback((retry: (() => void) | null) => {
     saveRetry.current = retry;
   }, []);
@@ -170,20 +175,28 @@ export function PrivateWorkspace() {
   }
 
   async function importMap({ title, markdown }: ParsedMarkdownFile) {
+    const ensureCurrentDraftIsSaved = () => {
+      if (saveStatusRef.current !== 'saved') {
+        throw new Error('Save the current draft before importing.');
+      }
+    };
+    ensureCurrentDraftIsSaved();
     if (!ownerUid || !client) {
       throw new Error('The workspace is unavailable.');
     }
     setOperationError(false);
+    let created: Awaited<ReturnType<typeof createMindMap>>;
     try {
-      const created = await createMindMap(client.firestore, {
+      created = await createMindMap(client.firestore, {
         ownerUid, folderId: null, title, markdown, contentSearchText: markdown.toLocaleLowerCase()
       });
-      setSelectedMapId(created.id);
-      setImportOpen(false);
     } catch (error) {
       setOperationError(true);
       throw error;
     }
+    ensureCurrentDraftIsSaved();
+    setSelectedMapId(created.id);
+    setImportOpen(false);
   }
 
   async function renameMap(title: string) {
@@ -232,7 +245,7 @@ export function PrivateWorkspace() {
         <button type="button" disabled={saveStatus !== 'saved'} onClick={() => setImportOpen(true)}>Import Markdown</button>
         <button type="button" onClick={() => void signOut()}>Sign out</button>
       </header>
-      <MapWorkspace sidebar={sidebar} map={selectedMap} database={client.firestore} onStatus={setSaveStatus} onRetryChange={handleSaveRetryChange} />
+      <MapWorkspace sidebar={sidebar} map={selectedMap} database={client.firestore} onStatus={handleSaveStatus} onRetryChange={handleSaveRetryChange} />
       {importOpen ? <ImportDialog onImport={importMap} onCancel={() => setImportOpen(false)} /> : null}
       {pendingFolder ? (
         <DeleteFolderDialog

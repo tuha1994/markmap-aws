@@ -111,6 +111,54 @@ describe('PrivateWorkspace', () => {
     expect(screen.getByRole('button', { name: 'Import Markdown' })).toBeDisabled();
   });
 
+  it('refuses an already-confirmed import when the current draft becomes unsaved', async () => {
+    render(<PrivateWorkspace />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import Markdown' }));
+    fireEvent.change(screen.getByLabelText('Markdown file'), {
+      target: { files: [new File(['# Imported map'], 'Imported map.md', { type: 'text/markdown' })] }
+    });
+    await screen.findByText('Imported map');
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Markdown' }), { target: { value: '# Active draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Import as new map' }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Save the current draft before importing.'));
+    expect(mockedCreateMindMap).not.toHaveBeenCalled();
+    expect(screen.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Active draft');
+    expect(screen.getByRole('heading', { name: 'Architecture' })).toBeInTheDocument();
+  });
+
+  it('does not switch maps when an in-progress import loses saved status', async () => {
+    const imported = { ...makeMindMap({ title: 'Imported map' }), id: 'imported-map' };
+    mapList.current = {
+      maps: [{ ...makeMindMap({ title: 'Architecture' }), id: 'map-1' }, imported],
+      loading: false,
+      error: null
+    };
+    let finishCreate!: () => void;
+    mockedCreateMindMap.mockImplementationOnce(() => new Promise((resolve) => {
+      finishCreate = () => resolve(imported as never);
+    }) as never);
+    render(<PrivateWorkspace />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import Markdown' }));
+    fireEvent.change(screen.getByLabelText('Markdown file'), {
+      target: { files: [new File(['# Imported map'], 'Imported map.md', { type: 'text/markdown' })] }
+    });
+    await within(screen.getByRole('dialog', { name: 'Import Markdown' })).findByText('Imported map');
+    fireEvent.click(screen.getByRole('button', { name: 'Import as new map' }));
+    await waitFor(() => expect(mockedCreateMindMap).toHaveBeenCalledOnce());
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Markdown' }), { target: { value: '# Active draft' } });
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Unsaved changes'));
+    await act(async () => finishCreate());
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Save the current draft before importing.'));
+    expect(screen.getByRole('heading', { name: 'Architecture' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Active draft');
+  });
+
   it('shows loading and save error states without rendering private map payloads', () => {
     mapList.current = {
       maps: [{ ...makeMindMap({ title: 'Private title', markdown: '# Private content' }), id: 'map-1' }],

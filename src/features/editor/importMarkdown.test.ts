@@ -14,6 +14,20 @@ describe('parseMarkdownFile', () => {
     });
   });
 
+  it('rejects a filename-derived title that exceeds the 120 character map limit', async () => {
+    await expect(parseMarkdownFile(markdownFile(`${'a'.repeat(121)}.md`, '# Notes'))).rejects.toMatchObject({
+      name: 'MarkdownImportError',
+      message: 'Imported map titles must be 120 characters or fewer.'
+    });
+  });
+
+  it('rejects invalid filename-derived titles before they can be proposed for a write', async () => {
+    await expect(parseMarkdownFile(markdownFile('Quarter\u202Ecod.exe.md', '# Notes'))).rejects.toMatchObject({
+      name: 'MarkdownImportError',
+      message: 'Imported map titles cannot contain control or bidirectional characters.'
+    });
+  });
+
   it.each([
     ['extension', markdownFile('notes.txt', '# Notes')],
     ['size', markdownFile('notes.md', 'é'.repeat(131073))],

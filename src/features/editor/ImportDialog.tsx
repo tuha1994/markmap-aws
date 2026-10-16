@@ -29,8 +29,8 @@ export function ImportDialog({ onImport, onCancel, busy = false }: Props) {
     setImporting(true);
     try {
       await onImport(parsed);
-    } catch {
-      setError('The new map could not be created.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The new map could not be created.');
       setImporting(false);
     }
   }

@@ -1,12 +1,23 @@
+const UNSAFE_FILENAME_CHARACTERS = /[\u0000-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
+const WINDOWS_RESERVED_BASENAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu;
+
 export function sanitizeMarkdownFilename(filename: string): string {
-  const withoutExtension = filename.trim().replace(/\.md$/i, '');
+  const withoutExtension = filename.trim().replace(/\.md$/i, '').normalize('NFC');
+  if (UNSAFE_FILENAME_CHARACTERS.test(withoutExtension)) {
+    return 'mind-map.md';
+  }
+
   const sanitized = withoutExtension
     .replace(/[\\/:*?"<>|]+/g, ' - ')
     .replace(/\s+/g, ' ')
     .replace(/(?: - )+/g, ' - ')
     .replace(/^(?: - )|(?: - )$/g, '')
+    .replace(/[. ]+$/u, '')
     .trim();
-  return `${sanitized || 'mind-map'}.md`;
+  if (!sanitized || WINDOWS_RESERVED_BASENAME.test(sanitized)) {
+    return 'mind-map.md';
+  }
+  return `${sanitized}.md`;
 }
 
 export function downloadMarkdown(filename: string, markdown: string): void {
