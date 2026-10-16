@@ -51,29 +51,81 @@ test('keeps the authorized workspace Maps, Edit, and Preview panes operable at 3
   await expect(page.getByRole('button', { name: 'Exit focus mode' })).toBeVisible();
 });
 
-test('keeps desktop workspace resize bounds, focus editing, and native Markmap controls available', async ({ page }) => {
+test('uses real pointer drags to keep desktop workspace panels bounded and preserves an unsaved focus draft', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('./');
   await signInToLocalWorkspace(page);
 
-  const sidebarDivider = page.getByRole('separator', { name: 'Sidebar width' });
-  const editorDivider = page.getByRole('separator', { name: 'Editor width' });
+  const sidebar = page.getByLabel('Workspace navigation');
+  const editor = page.getByLabel('Markdown editor');
   const preview = page.getByRole('img', { name: 'Markmap preview' });
   const previewPanel = page.getByLabel('Preview pane');
-  await expect(sidebarDivider).toHaveAttribute('aria-valuemin', '224');
-  await expect(sidebarDivider).toHaveAttribute('aria-valuemax', '420');
-  await sidebarDivider.press('End');
+  const sidebarDivider = page.getByRole('separator', { name: 'Sidebar width' });
+  const editorDivider = page.getByRole('separator', { name: 'Editor width' });
+  const sidebarBefore = await sidebar.boundingBox();
+  const sidebarDividerBox = await sidebarDivider.boundingBox();
+  expect(sidebarBefore).not.toBeNull();
+  expect(sidebarDividerBox).not.toBeNull();
+
+  await page.mouse.move(sidebarDividerBox!.x + sidebarDividerBox!.width / 2, sidebarDividerBox!.y + sidebarDividerBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sidebarDividerBox!.x + sidebarDividerBox!.width / 2 + 88, sidebarDividerBox!.y + sidebarDividerBox!.height / 2, { steps: 8 });
+  await page.mouse.up();
+
+  const sidebarAfter = await sidebar.boundingBox();
+  expect(sidebarAfter).not.toBeNull();
+  expect(sidebarAfter!.width).toBeGreaterThan(sidebarBefore!.width + 70);
+  expect(sidebarAfter!.width).toBeLessThan(sidebarBefore!.width + 106);
+  expect(sidebarAfter!.width).toBeGreaterThanOrEqual(224);
+  expect(sidebarAfter!.width).toBeLessThanOrEqual(420);
+  await expect(sidebarDivider).toHaveAttribute('aria-valuenow', '388');
+
+  const sidebarDividerAfterIntermediateDrag = await sidebarDivider.boundingBox();
+  expect(sidebarDividerAfterIntermediateDrag).not.toBeNull();
+  await page.mouse.move(sidebarDividerAfterIntermediateDrag!.x + sidebarDividerAfterIntermediateDrag!.width / 2, sidebarDividerAfterIntermediateDrag!.y + sidebarDividerAfterIntermediateDrag!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sidebarDividerAfterIntermediateDrag!.x + sidebarDividerAfterIntermediateDrag!.width / 2 + 600, sidebarDividerAfterIntermediateDrag!.y + sidebarDividerAfterIntermediateDrag!.height / 2, { steps: 8 });
+  await page.mouse.up();
+  const sidebarAtMaximum = await sidebar.boundingBox();
+  expect(sidebarAtMaximum).not.toBeNull();
+  expect(sidebarAtMaximum!.width).toBeGreaterThanOrEqual(224);
+  expect(sidebarAtMaximum!.width).toBeLessThanOrEqual(420);
   await expect(sidebarDivider).toHaveAttribute('aria-valuenow', '420');
-  await sidebarDivider.press('Home');
+
+  const sidebarDividerAtMaximum = await sidebarDivider.boundingBox();
+  expect(sidebarDividerAtMaximum).not.toBeNull();
+  await page.mouse.move(sidebarDividerAtMaximum!.x + sidebarDividerAtMaximum!.width / 2, sidebarDividerAtMaximum!.y + sidebarDividerAtMaximum!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sidebarDividerAtMaximum!.x + sidebarDividerAtMaximum!.width / 2 - 1000, sidebarDividerAtMaximum!.y + sidebarDividerAtMaximum!.height / 2, { steps: 8 });
+  await page.mouse.up();
+  const sidebarAtMinimum = await sidebar.boundingBox();
+  expect(sidebarAtMinimum).not.toBeNull();
+  expect(sidebarAtMinimum!.width).toBeGreaterThanOrEqual(224);
+  expect(sidebarAtMinimum!.width).toBeLessThanOrEqual(420);
   await expect(sidebarDivider).toHaveAttribute('aria-valuenow', '224');
 
-  await editorDivider.press('End');
-  const editorMaximum = Number(await editorDivider.getAttribute('aria-valuemax'));
-  expect(editorMaximum).toBeGreaterThanOrEqual(27);
-  expect(editorMaximum).toBeLessThanOrEqual(62);
-  await expect(editorDivider).toHaveAttribute('aria-valuenow', `${editorMaximum}`);
-  await expect(previewPanel).toHaveCSS('min-width', '320px');
+  const editorBefore = await editor.boundingBox();
+  const editorDividerBox = await editorDivider.boundingBox();
+  expect(editorBefore).not.toBeNull();
+  expect(editorDividerBox).not.toBeNull();
 
+  await page.mouse.move(editorDividerBox!.x + editorDividerBox!.width / 2, editorDividerBox!.y + editorDividerBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(editorDividerBox!.x + editorDividerBox!.width / 2 + 84, editorDividerBox!.y + editorDividerBox!.height / 2, { steps: 8 });
+  await page.mouse.up();
+
+  const [editorAfter, previewAfter] = await Promise.all([editor.boundingBox(), previewPanel.boundingBox()]);
+  expect(editorAfter).not.toBeNull();
+  expect(previewAfter).not.toBeNull();
+  expect(editorAfter!.width).toBeGreaterThan(editorBefore!.width + 65);
+  expect(previewAfter!.width).toBeGreaterThanOrEqual(320);
+  expect(editorAfter!.x + editorAfter!.width).toBeLessThanOrEqual(previewAfter!.x);
+  await expect(editorDivider).not.toHaveAttribute('aria-valuenow', '39');
+
+  const draft = '# Focus-preserved E2E draft\n\n- exact local draft';
+  const markdown = page.getByRole('textbox', { name: 'Markdown' });
+  await markdown.fill(draft);
+  await expect(page.getByRole('region', { name: 'Save status' })).toContainText('Unsaved changes');
   await page.getByRole('button', { name: 'Focus mode', exact: true }).click();
   await expect(page.getByLabel('Workspace navigation')).toBeHidden();
   await expect(page.getByLabel('Markdown editor')).toBeHidden();
@@ -81,11 +133,11 @@ test('keeps desktop workspace resize bounds, focus editing, and native Markmap c
   for (const name of ['Zoom in', 'Zoom out', 'Fit preview', 'Reset preview']) {
     await expect(page.getByRole('button', { name })).toBeVisible();
   }
-  await page.getByRole('button', { name: 'Fit preview' }).click();
-  await expect(preview.locator('.markmap-node')).toHaveCount(1);
+  await expect(preview).toContainText('Focus-preserved E2E draft');
   await page.getByRole('button', { name: 'Exit focus mode' }).click();
   await expect(page.getByRole('separator')).toHaveCount(2);
-  await expect(page.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# E2E workspace map');
+  await expect(markdown).toHaveValue(draft);
+  await expect(preview).toContainText('Focus-preserved E2E draft');
 });
 
 test('persists a desktop theme preference as UI-only local state', async ({ page }) => {
