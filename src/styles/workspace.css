@@ -94,9 +94,18 @@ textarea { display: block; width: 100%; min-height: 60vh; margin-top: var(--work
 }
 
 @media (max-width: 920px) {
-  .workspace-header { grid-template-columns: auto minmax(0, 1fr) auto; }
-  .workspace-header-status { display: none; }
-  .workspace-header-actions { grid-column: 3; }
+  .workspace-header {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'brand context actions'
+      '. status status';
+  }
+  .workspace-brand { grid-area: brand; }
+  .workspace-map-context { grid-area: context; }
+  .workspace-header-status { grid-area: status; min-width: 0; }
+  .workspace-header-status [aria-label='Save status'] { flex-wrap: wrap; gap: 0.25rem 0.5rem; }
+  .workspace-header-status [aria-label='Save status'] [role='note'] { max-width: none; }
+  .workspace-header-actions { grid-area: actions; }
   .desktop-pane-layout { grid-template-columns: minmax(17rem, 0.85fr) minmax(20rem, 1.15fr); }
   .desktop-pane-layout > aside { display: none; }
 }

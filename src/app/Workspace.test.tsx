@@ -99,6 +99,11 @@ describe('PrivateWorkspace', () => {
     expect(workspaceStyles).toContain('--workspace-error: #b42318');
   });
 
+  it('keeps the semantic save status visible with a compact tablet treatment', () => {
+    expect(workspaceStyles).not.toMatch(/@media \(max-width: 920px\)\s*\{[\s\S]*?\.workspace-header-status\s*\{\s*display:\s*none;\s*\}/);
+    expect(workspaceStyles).toMatch(/@media \(max-width: 920px\)\s*\{[\s\S]*?\.workspace-header-status\s*\{[^}]*min-width:\s*0;/);
+  });
+
   it('lets an approved user create, select, rename, and archive an owned map', () => {
     render(<PrivateWorkspace />);
 
