@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 
 type Pane = 'maps' | 'editor' | 'preview';
 
@@ -6,6 +6,7 @@ type Props = {
   maps: ReactNode;
   editor: ReactNode;
   preview: ReactNode;
+  focusMode?: boolean;
 };
 
 const panes: Array<{ id: Pane; label: string }> = [
@@ -14,9 +15,12 @@ const panes: Array<{ id: Pane; label: string }> = [
   { id: 'preview', label: 'Preview' }
 ];
 
-export function ResponsivePaneTabs({ maps, editor, preview }: Props) {
+export function ResponsivePaneTabs({ maps, editor, preview, focusMode = false }: Props) {
   const [activePane, setActivePane] = useState<Pane>('maps');
   const prefix = useId();
+  useEffect(() => {
+    if (focusMode) setActivePane('preview');
+  }, [focusMode]);
   function selectWithKey(key: string, current: Pane, target: HTMLButtonElement) {
     const currentIndex = panes.findIndex((pane) => pane.id === current);
     const nextIndex = key === 'ArrowRight'

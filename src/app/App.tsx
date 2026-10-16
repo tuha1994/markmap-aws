@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { WorkspaceFeedback } from '../components/feedback/WorkspaceFeedback';
 import { AppShell } from '../components/layout/AppShell';
 import { ResponsivePaneTabs } from '../components/layout/ResponsivePaneTabs';
+import { useWorkspaceLayout, type WorkspaceLayout } from '../components/layout/useWorkspaceLayout';
 import { AccessGate } from '../features/access/AccessGate';
 import { AuthGate } from '../features/auth/AuthGate';
 import { AuthProvider, useAuth } from '../features/auth/AuthProvider';
@@ -37,6 +38,7 @@ type MapWorkspaceProps = {
   sidebar: ReactNode;
   map: StoredMindMap | null;
   database: NonNullable<ReturnType<typeof getFirebaseClient>>['firestore'];
+  layout: WorkspaceLayout;
   onStatus(status: SaveStatusValue): void;
   onRetryChange(retry: (() => void) | null): void;
 };
@@ -45,17 +47,17 @@ function EmptyPane({ label, children }: { label: string; children: ReactNode }) 
   return <section aria-label={label}>{children}</section>;
 }
 
-function MapWorkspace({ sidebar, map, database, onStatus, onRetryChange }: MapWorkspaceProps) {
+function MapWorkspace({ sidebar, map, database, layout, onStatus, onRetryChange }: MapWorkspaceProps) {
   if (!map) {
     const editor = <EmptyPane label="Markdown editor"><p>Select or create a map to begin editing.</p></EmptyPane>;
     const preview = <EmptyPane label="Preview pane"><p>A preview appears after a map is selected.</p></EmptyPane>;
-    return <><AppShell sidebar={sidebar} editor={editor} preview={preview} /><ResponsivePaneTabs maps={sidebar} editor={editor} preview={preview} /></>;
+    return <><AppShell sidebar={sidebar} editor={editor} preview={preview} mode={layout.mode} sidebarCollapsed={layout.sidebarCollapsed} onModeChange={layout.setMode} onSidebarCollapsedChange={layout.setSidebarCollapsed} /><ResponsivePaneTabs maps={sidebar} editor={editor} preview={preview} focusMode={layout.mode === 'focus'} /></>;
   }
 
-  return <SelectedMapWorkspace key={map.id} sidebar={sidebar} map={map} database={database} onStatus={onStatus} onRetryChange={onRetryChange} />;
+  return <SelectedMapWorkspace key={map.id} sidebar={sidebar} map={map} database={database} layout={layout} onStatus={onStatus} onRetryChange={onRetryChange} />;
 }
 
-function SelectedMapWorkspace({ sidebar, map, database, onStatus, onRetryChange }: Omit<MapWorkspaceProps, 'map'> & { map: StoredMindMap }) {
+function SelectedMapWorkspace({ sidebar, map, database, layout, onStatus, onRetryChange }: Omit<MapWorkspaceProps, 'map'> & { map: StoredMindMap }) {
   const repository = useMemo(() => ({
     update: (input: Parameters<typeof updateMindMapVersioned>[1]) => updateMindMapVersioned(database, input),
     saveRevision: (input: Parameters<typeof createRevisionAndSaveMap>[1]) => createRevisionAndSaveMap(database, input),
@@ -100,11 +102,11 @@ function SelectedMapWorkspace({ sidebar, map, database, onStatus, onRetryChange 
 
   const history = <VersionHistoryPanel revisions={revisions} onRestore={setRevisionToRestore} onSaveVersion={queue.saveVersion} />;
   const editor = <><MarkdownEditor value={queue.draft} onChange={queue.setDraft} /><button type="button" onClick={() => downloadMarkdown(map.title, queue.draft)}>Export Markdown</button></>;
-  const preview = <MarkmapPreview markdown={queue.draft} />;
+  const preview = <MarkmapPreview markdown={queue.draft} isFocusMode={layout.mode === 'focus'} onToggleFocus={() => layout.setMode(layout.mode === 'focus' ? 'edit' : 'focus')} />;
   return <>
     {restoreError ? <p role="alert">The revision could not be restored.</p> : null}
-    <AppShell sidebar={<>{sidebar}{history}</>} editor={editor} preview={preview} />
-    <ResponsivePaneTabs maps={<>{sidebar}{history}</>} editor={editor} preview={preview} />
+    <AppShell sidebar={<>{sidebar}{history}</>} editor={editor} preview={preview} mode={layout.mode} sidebarCollapsed={layout.sidebarCollapsed} onModeChange={layout.setMode} onSidebarCollapsedChange={layout.setSidebarCollapsed} />
+    <ResponsivePaneTabs maps={<>{sidebar}{history}</>} editor={editor} preview={preview} focusMode={layout.mode === 'focus'} />
     {queue.conflict ? <ConflictDialog {...queue.conflict} onResolve={queue.resolveConflict} /> : null}
     {revisionToRestore ? <RestoreRevisionDialog revision={revisionToRestore} onRestore={() => void confirmRestore()} onCancel={() => setRevisionToRestore(null)} busy={restoreBusy} /> : null}
   </>;
@@ -112,6 +114,7 @@ function SelectedMapWorkspace({ sidebar, map, database, onStatus, onRetryChange 
 
 export function PrivateWorkspace() {
   const { user, signOut } = useAuth();
+  const layout = useWorkspaceLayout();
   const ownerUid = user?.uid ?? null;
   const { maps, loading, error } = useMindMapList(ownerUid);
   const [selectedMapId, setSelectedMapId] = useState<string | null>(null);
@@ -239,7 +242,7 @@ export function PrivateWorkspace() {
   const sidebar = <><FolderSidebar folders={folders} maps={maps} onArchive={setPendingFolderId} archiveDisabled={saveStatus !== 'saved'} /><MapActions mapTitle={selectedMap?.title} onCreate={createMap} onRename={renameMap} onArchive={archiveMap} disabled={saveStatus !== 'saved'} /><MapSearch maps={maps} onSelect={selectMap} /><MapList maps={maps} selectedMapId={selectedMapId} onSelect={selectMap} /></>;
 
   return (
-    <main aria-label="Markmap AWS workspace">
+    <main aria-label="Markmap AWS workspace" data-workspace-theme={layout.theme}>
       <header className="workspace-header" aria-label="Workspace header">
         <div className="workspace-brand" aria-label="Markmap AWS">
           <span className="workspace-brand-mark" aria-hidden="true">M</span>
@@ -255,10 +258,11 @@ export function PrivateWorkspace() {
         {operationError ? <p className="workspace-operation-alert" role="alert">The map action could not be completed.</p> : null}
         <div className="workspace-header-actions" aria-label="Workspace actions">
           <button type="button" disabled={saveStatus !== 'saved'} onClick={() => setImportOpen(true)}>Import Markdown</button>
+          <button type="button" aria-label={`Switch to ${layout.theme === 'light' ? 'dark' : 'light'} theme`} onClick={() => layout.setTheme(layout.theme === 'light' ? 'dark' : 'light')}>Theme</button>
           <button type="button" onClick={() => void signOut()}>Sign out</button>
         </div>
       </header>
-      <MapWorkspace sidebar={sidebar} map={selectedMap} database={client.firestore} onStatus={handleSaveStatus} onRetryChange={handleSaveRetryChange} />
+      <MapWorkspace sidebar={sidebar} map={selectedMap} database={client.firestore} layout={layout} onStatus={handleSaveStatus} onRetryChange={handleSaveRetryChange} />
       {importOpen ? <ImportDialog onImport={importMap} onCancel={() => setImportOpen(false)} /> : null}
       {pendingFolder ? (
         <DeleteFolderDialog

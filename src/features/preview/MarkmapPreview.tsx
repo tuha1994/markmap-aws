@@ -2,9 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { createMarkmapAdapter, type MarkmapAdapter } from './markmapAdapter';
 import { PreviewToolbar } from './PreviewToolbar';
 
-type Props = { markdown: string; createAdapter?: (svg: SVGSVGElement) => MarkmapAdapter };
+type Props = {
+  markdown: string;
+  createAdapter?: (svg: SVGSVGElement) => MarkmapAdapter;
+  isFocusMode?: boolean;
+  onToggleFocus?: () => void;
+};
 
-export function MarkmapPreview({ markdown, createAdapter = createMarkmapAdapter }: Props) {
+export function MarkmapPreview({ markdown, createAdapter = createMarkmapAdapter, isFocusMode = false, onToggleFocus }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const adapterRef = useRef<MarkmapAdapter | null>(null);
   const mountedRef = useRef(false);
@@ -49,7 +54,7 @@ export function MarkmapPreview({ markdown, createAdapter = createMarkmapAdapter 
 
   return (
     <section aria-label="Mind map preview">
-      <PreviewToolbar adapter={adapter} />
+      <PreviewToolbar adapter={adapter} isFocusMode={isFocusMode} onToggleFocus={onToggleFocus} />
       {error ? <p role="alert">Unable to render preview</p> : null}
       <svg ref={svgRef} aria-label="Markmap preview" />
     </section>

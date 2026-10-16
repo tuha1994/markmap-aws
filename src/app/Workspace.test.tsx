@@ -43,7 +43,11 @@ vi.mock('../features/history/revisionRepository', async (importOriginal) => {
   return { ...actual, createRevisionAndSaveMap: vi.fn(), listRevisions: vi.fn(), restoreRevision: vi.fn() };
 });
 vi.mock('../features/preview/MarkmapPreview', () => ({
-  MarkmapPreview: () => <section aria-label="Mind map preview" />
+  MarkmapPreview: ({ isFocusMode, onToggleFocus }: { isFocusMode?: boolean; onToggleFocus?: () => void }) => (
+    <section aria-label="Mind map preview">
+      <button type="button" onClick={onToggleFocus}>{isFocusMode ? 'Exit focus mode' : 'Enter focus mode'}</button>
+    </section>
+  )
 }));
 
 const mockedCreateMindMap = vi.mocked(createMindMap);
@@ -61,6 +65,7 @@ function signedIn() {
 describe('PrivateWorkspace', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     auth.current = signedIn();
     const map = { ...makeMindMap({ title: 'Architecture' }), id: 'map-1' };
     mapList.current = { maps: [map], loading: false, error: null };
@@ -343,5 +348,29 @@ describe('PrivateWorkspace', () => {
     expect(mockedCreateRevisionAndSaveMap).toHaveBeenLastCalledWith({}, expect.objectContaining({ reason: 'manual' }));
     expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Saved');
     vi.useRealTimers();
+  });
+
+  it('persists theme choice and hides the desktop sidebar and editor without unmounting them in focus mode', () => {
+    const { container } = render(<PrivateWorkspace />);
+    const workspace = screen.getByRole('main', { name: 'Markmap AWS workspace' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to dark theme' }));
+    expect(workspace).toHaveAttribute('data-workspace-theme', 'dark');
+    expect(JSON.parse(window.localStorage.getItem('markmap-aws.workspace-layout') ?? '{}')).toEqual({
+      theme: 'dark', mode: 'edit', sidebarCollapsed: false
+    });
+
+    const editor = container.querySelector('[data-workspace-panel="editor"]');
+    const preview = container.querySelector('[data-workspace-panel="preview"]');
+    fireEvent.click(screen.getByRole('button', { name: 'Focus mode' }));
+
+    expect(container.querySelector('[data-workspace-panel="sidebar"]')).toHaveAttribute('hidden');
+    expect(editor).toHaveAttribute('hidden');
+    expect(editor?.querySelector('textarea')).toBeInTheDocument();
+    expect(within(preview as HTMLElement).getByRole('button', { name: 'Exit focus mode' })).toBeInTheDocument();
+
+    fireEvent.click(within(preview as HTMLElement).getByRole('button', { name: 'Exit focus mode' }));
+    expect(container.querySelector('[data-workspace-panel="sidebar"]')).not.toHaveAttribute('hidden');
+    expect(editor).not.toHaveAttribute('hidden');
   });
 });

@@ -23,6 +23,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; background: var(--workspace-canvas); }
+main[data-workspace-theme] { min-height: 100vh; color: var(--workspace-ink); background: var(--workspace-canvas); }
 button, input, textarea { font: inherit; }
 button, input, textarea { border-radius: var(--workspace-radius-sm); }
 button { min-height: 2.25rem; padding: 0.5rem 0.75rem; color: var(--workspace-ink); background: var(--workspace-surface); border: 1px solid var(--workspace-border); cursor: pointer; }
@@ -65,7 +66,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .workspace-header-actions button:first-child { color: var(--workspace-accent); border-color: color-mix(in srgb, var(--workspace-accent) 28%, var(--workspace-border)); }
 
 .app-shell { padding: var(--workspace-space-2); }
+.workspace-layout-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--workspace-space-1); max-width: 1600px; margin: 0 auto var(--workspace-space-1); }
+.workspace-layout-toolbar [role='group'] { display: inline-flex; gap: 0.25rem; padding: 0.1875rem; background: var(--workspace-accent-soft); border-radius: var(--workspace-radius-sm); }
+.workspace-layout-toolbar [aria-pressed='true'] { color: #fff; background: var(--workspace-accent); border-color: var(--workspace-accent); }
 .desktop-pane-layout { display: grid; grid-template-columns: minmax(14rem, 0.75fr) minmax(18rem, 1fr) minmax(20rem, 1.35fr); gap: var(--workspace-space-2); max-width: 1600px; margin: 0 auto; }
+.app-shell[data-workspace-mode='focus'] .desktop-pane-layout { grid-template-columns: minmax(0, 1fr); }
+.app-shell[data-sidebar-collapsed='true']:not([data-workspace-mode='focus']) .desktop-pane-layout { grid-template-columns: minmax(18rem, 1fr) minmax(20rem, 1.35fr); }
 .desktop-pane-layout > * { min-width: 0; padding: var(--workspace-space-2); background: var(--workspace-surface); border: 1px solid var(--workspace-border); border-radius: var(--workspace-radius-md); box-shadow: var(--workspace-shadow); }
 .desktop-pane-layout > aside { background: var(--workspace-surface-elevated); }
 .mobile-pane-tabs { display: none; }
@@ -91,6 +97,36 @@ textarea { display: block; width: 100%; min-height: 60vh; margin-top: var(--work
     --workspace-error: #ffb4ab;
     --workspace-shadow: 0 12px 30px rgb(0 0 0 / 26%);
   }
+}
+
+main[data-workspace-theme='light'] {
+  color-scheme: light;
+  --workspace-canvas: #f5f7fb;
+  --workspace-surface: #ffffff;
+  --workspace-surface-elevated: #ffffff;
+  --workspace-ink: #172033;
+  --workspace-muted: #667085;
+  --workspace-border: #d9e0ec;
+  --workspace-accent: #4f46e5;
+  --workspace-accent-soft: #eef2ff;
+  --workspace-success: #087443;
+  --workspace-error: #b42318;
+  --workspace-shadow: 0 12px 30px rgb(23 32 51 / 10%);
+}
+
+main[data-workspace-theme='dark'] {
+  color-scheme: dark;
+  --workspace-canvas: #101522;
+  --workspace-surface: #171e2d;
+  --workspace-surface-elevated: #1d2638;
+  --workspace-ink: #f3f5fa;
+  --workspace-muted: #aab5c6;
+  --workspace-border: #303b50;
+  --workspace-accent: #a5b4fc;
+  --workspace-accent-soft: #273258;
+  --workspace-success: #5ee1a1;
+  --workspace-error: #ffb4ab;
+  --workspace-shadow: 0 12px 30px rgb(0 0 0 / 26%);
 }
 
 @media (max-width: 920px) {
@@ -119,7 +155,8 @@ textarea { display: block; width: 100%; min-height: 60vh; margin-top: var(--work
   .mobile-pane-tabs [role='tab'][aria-selected='true'] { color: var(--workspace-accent); border-bottom: 3px solid var(--workspace-accent); font-weight: 700; }
   .mobile-pane-tabs [role='tabpanel'] { padding: var(--workspace-space-2); }
   .workspace-header { grid-template-columns: auto minmax(0, 1fr); gap: 0.75rem; min-height: auto; }
-  .workspace-header-actions { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; }
+  .workspace-header-actions { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); }
+  .workspace-layout-toolbar { padding: 0 var(--workspace-space-2); }
   .workspace-header-actions button { min-height: 2.75rem; }
   .workspace-operation-alert { grid-column: 1 / -1; }
 }
