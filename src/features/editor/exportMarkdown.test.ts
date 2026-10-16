@@ -9,6 +9,13 @@ describe('downloadMarkdown', () => {
     expect(sanitizeMarkdownFilename('Draft\u0000notes')).toBe('mind-map.md');
   });
 
+  it('falls back for Windows reserved device names with superscript port digits', () => {
+    expect(sanitizeMarkdownFilename('COM¹')).toBe('mind-map.md');
+    expect(sanitizeMarkdownFilename('com².md')).toBe('mind-map.md');
+    expect(sanitizeMarkdownFilename('LPT³.txt')).toBe('mind-map.md');
+    expect(sanitizeMarkdownFilename('lpt¹. ')).toBe('mind-map.md');
+  });
+
   it('removes trailing Windows-invalid dots and spaces from an otherwise safe title', () => {
     expect(sanitizeMarkdownFilename('Architecture. ')).toBe('Architecture.md');
   });

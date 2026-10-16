@@ -1,5 +1,5 @@
 const UNSAFE_FILENAME_CHARACTERS = /[\u0000-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
-const WINDOWS_RESERVED_BASENAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu;
+const WINDOWS_RESERVED_BASENAME = /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?$/iu;
 
 export function sanitizeMarkdownFilename(filename: string): string {
   const withoutExtension = filename.trim().replace(/\.md$/i, '').normalize('NFC');
