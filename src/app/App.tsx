@@ -7,6 +7,7 @@ import { AccessGate } from '../features/access/AccessGate';
 import { AuthGate } from '../features/auth/AuthGate';
 import { AuthProvider, useAuth } from '../features/auth/AuthProvider';
 import { ImportDialog } from '../features/editor/ImportDialog';
+import { ConflictDialog } from '../features/editor/ConflictDialog';
 import { type ParsedMarkdownFile } from '../features/editor/importMarkdown';
 import { MarkdownEditor } from '../features/editor/MarkdownEditor';
 import { downloadMarkdown } from '../features/editor/exportMarkdown';
@@ -104,6 +105,7 @@ function SelectedMapWorkspace({ sidebar, map, database, onStatus, onRetryChange 
     {restoreError ? <p role="alert">The revision could not be restored.</p> : null}
     <AppShell sidebar={<>{sidebar}{history}</>} editor={editor} preview={preview} />
     <ResponsivePaneTabs maps={<>{sidebar}{history}</>} editor={editor} preview={preview} />
+    {queue.conflict ? <ConflictDialog {...queue.conflict} onResolve={queue.resolveConflict} /> : null}
     {revisionToRestore ? <RestoreRevisionDialog revision={revisionToRestore} onRestore={() => void confirmRestore()} onCancel={() => setRevisionToRestore(null)} busy={restoreBusy} /> : null}
   </>;
 }

@@ -8,6 +8,8 @@
     "build": "vite build",
     "test": "vitest run",
     "test:rules": "node scripts/run-rules-tests.mjs",
+    "test:e2e": "npm run build && playwright test",
+    "test:all": "npm run test && npm run test:rules && npm run test:e2e",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "ci:install": "npm ci"
@@ -21,6 +23,7 @@
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "6.0.0",
+    "@playwright/test": "1.64.1",
     "@testing-library/jest-dom": "7.0.1",
     "@testing-library/react": "16.3.3",
     "@types/react": "19.3.0",

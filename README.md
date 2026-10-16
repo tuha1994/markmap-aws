@@ -9,7 +9,7 @@ npm ci
 npm run dev
 ```
 
-Use the committed lockfile with `npm ci` for deterministic installs. Run `npm test`, `npm run lint`, `npm run typecheck`, and `npm run build` before sharing changes.
+Use the committed lockfile with `npm ci` for deterministic installs. Run `npm test`, `npm run test:rules`, `npm run test:e2e`, `npm run lint`, `npm run typecheck`, and `npm run build` before sharing changes. `npm run test:all` runs the unit, Rules, and headless Chromium browser suites together.
 
 ## Security and repository safety
 
@@ -24,6 +24,12 @@ Rules tests run only against a dynamically configured local Firestore Emulator a
 ```bash
 npm run test:rules
 ```
+
+## Browser E2E coverage
+
+`npm run test:e2e` builds the public bundle, scans it for sentinel secret/private-content strings, and runs headless Chromium checks at 1280px and 360px. The browser suite uses synthetic Markdown only and covers the protected direct entrypoint, native Markmap rendering/fit behavior, and a competing-page conflict harness. It does not require Firebase credentials or contact a production Firebase project.
+
+Google popup sign-in cannot be safely automated without an approved non-production Firebase project and a privileged allow-list operator. Run that check manually only after obtaining approval: sign in with the Google popup against the approved test project, record the literal Authentication UID, create that UID's `authorizedUsers/{uid}` allow-list document out of band, then verify access and sign-out. Do not add test-project or production credentials to this repository.
 
 ## Privileged first UID grant runbook
 
