@@ -80,6 +80,7 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository, opt
   const latestRevisionAt = useRef(revisionTime(map.currentRevisionAt));
   const revisionPrunePending = useRef(map.revisionPrunePending);
   const recoveryRecord = useRef<DraftRecoveryRecord | null>(null);
+  const recoveryConflictEpoch = useRef(0);
   const recoveryStore = useRef<DraftRecoveryStore>(undefined!);
   const recoveryCoordinator = useRef<NonNullable<SaveQueueOptions['recoveryCoordinator']>>(undefined!);
   const timing = useRef<SaveQueueTiming>(undefined!);
@@ -125,6 +126,7 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository, opt
     }
 
     const savedGeneration = generation.current;
+    const savedRecoveryConflictEpoch = recoveryConflictEpoch.current;
     const savedMarkdown = draftRef.current;
     const currentMap = mapRef.current;
     const savedMapSession = mapSession.current;
@@ -146,6 +148,7 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository, opt
     const completion = Promise.resolve(request).then((result): SaveOutcome | Promise<SaveOutcome> => {
       if (savedMapSession !== mapSession.current || currentMap.id !== mapRef.current.id) return 'error';
       inFlight.current = false;
+      if (savedRecoveryConflictEpoch !== recoveryConflictEpoch.current) return 'conflict';
       if (result.status === 'updated' || result.status === 'saved') {
         confirmedVersion.current = result.status === 'updated' ? result.contentVersion : saveInput.expectedContentVersion + 1;
         if (shouldSaveRevision) {
@@ -328,6 +331,7 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository, opt
 
     const openRecoveryConflict = (record: DraftRecoveryRecord) => {
       if (!active || recoverySession !== mapSession.current) return;
+      recoveryConflictEpoch.current += 1;
       const nextConflict = {
         localMarkdown: record.markdown,
         remoteMarkdown: recoveryMap.markdown,

@@ -487,6 +487,38 @@ describe('useSaveQueue', () => {
     expect(store.deleteIfCurrent).not.toHaveBeenCalled();
   });
 
+  it('keeps a recovered draft conflict when a live writer appears during its in-flight autosave', async () => {
+    let notifyLiveWriters: ((writerIds: string[]) => void) | undefined;
+    const { options, store } = recoveryOptions([recoveryRecord()]);
+    const pendingUpdate = deferred<{ status: 'updated'; contentVersion: number }>();
+    options.recoveryCoordinator!.subscribeToLiveWriters = vi.fn((_uid, _mapId, listener) => {
+      notifyLiveWriters = listener;
+      listener([]);
+      return () => undefined;
+    });
+    render(<SaveQueueHarness repository={{ update: vi.fn().mockReturnValue(pendingUpdate.promise) }} options={options} />);
+
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByTestId('status')).toHaveTextContent('unsaved');
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Flush' }).click();
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('status')).toHaveTextContent('saving');
+
+    await act(async () => { notifyLiveWriters!(['writer-2']); });
+    expect(screen.getByTestId('status')).toHaveTextContent('conflict');
+
+    await act(async () => {
+      pendingUpdate.resolve({ status: 'updated', contentVersion: 2 });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('status')).toHaveTextContent('conflict');
+    expect(store.deleteIfCurrent).not.toHaveBeenCalled();
+  });
+
   it('opens a conflict instead of overwriting remote content for a stale recovery base version', async () => {
     const { options } = recoveryOptions([recoveryRecord({ baseContentVersion: 2 })]);
     render(<SaveQueueHarness repository={{ update: vi.fn() }} options={options} />);
