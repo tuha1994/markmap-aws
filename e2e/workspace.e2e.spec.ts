@@ -267,7 +267,7 @@ test('uses real pointer drags to keep desktop workspace panels bounded and prese
   const draft = '# Focus-preserved E2E draft\n\n- exact local draft';
   const markdown = page.getByRole('textbox', { name: 'Markdown' });
   await markdown.fill(draft);
-  await expect(page.getByRole('region', { name: 'Save status' })).toContainText('Unsaved changes');
+  await expect(page.getByRole('region', { name: 'Save status' })).toContainText('Unsaved');
   await page.getByRole('button', { name: 'Focus mode', exact: true }).click();
   await expect(page.getByLabel('Workspace navigation')).toBeHidden();
   await expect(page.getByLabel('Markdown editor')).toBeHidden();
@@ -350,11 +350,11 @@ test('shows a conflict in one browser page after another page writes', async ({ 
   await secondPage.getByRole('textbox', { name: 'Markdown' }).fill('# Remote device draft');
   await secondPage.getByRole('button', { name: 'Save version' }).first().click();
 
-  const conflict = firstPage.getByRole('dialog', { name: 'Remote change detected' });
+  const conflict = firstPage.getByRole('dialog', { name: 'Conflicting draft detected' });
   await expect(conflict).toBeVisible();
   await expect(conflict.getByText('# Local device draft')).toBeVisible();
   await expect(conflict.getByText('# Remote device draft')).toBeVisible();
-  await conflict.getByRole('button', { name: 'Use remote' }).click();
+  await conflict.getByRole('button', { name: 'Use competing draft' }).click();
   await expect(firstPage.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Remote device draft');
 
   await firstContext.close();
