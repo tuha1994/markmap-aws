@@ -19,7 +19,8 @@ export function SaveStatus({ status, onRetry }: Props) {
   return (
     <section aria-live="polite" aria-label="Save status">
       <p>{labels[status]}</p>
-      {['error', 'prunePending'].includes(status) && onRetry ? <button type="button" onClick={onRetry}>Retry</button> : null}
+      {status === 'offlinePending' ? <p>Draft is kept locally when possible; recovery is pending.</p> : null}
+      {['offlinePending', 'error', 'prunePending'].includes(status) && onRetry ? <button type="button" onClick={onRetry}>Retry</button> : null}
     </section>
   );
 }

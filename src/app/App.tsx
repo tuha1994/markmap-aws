@@ -66,7 +66,7 @@ function SelectedMapWorkspace({ sidebar, map, database, layout, onStatus, onRetr
     retryRevisionPrune: (mapId: string) => retryRevisionPrune(database, mapId)
   }), [database]);
   const queue = useSaveQueue(map, repository);
-  const handledNavigationMapId = useRef<string | null>(null);
+  const navigationFlushMapId = useRef<string | null>(null);
   const [revisions, setRevisions] = useState<StoredRevision[]>([]);
   const [revisionToRestore, setRevisionToRestore] = useState<StoredRevision | null>(null);
   const [restoreBusy, setRestoreBusy] = useState(false);
@@ -89,13 +89,17 @@ function SelectedMapWorkspace({ sidebar, map, database, layout, onStatus, onRetr
   }, [onRetryChange, queue.retry]);
   useEffect(() => {
     if (!pendingNavigationMapId) {
-      handledNavigationMapId.current = null;
+      navigationFlushMapId.current = null;
       return;
     }
-    if (handledNavigationMapId.current === pendingNavigationMapId) return;
-    handledNavigationMapId.current = pendingNavigationMapId;
-    void queue.flush().then((result) => onNavigationFlush(pendingNavigationMapId, result));
-  }, [onNavigationFlush, pendingNavigationMapId, queue.flush]);
+    if (queue.status === 'saved') {
+      onNavigationFlush(pendingNavigationMapId, 'saved');
+      return;
+    }
+    if (navigationFlushMapId.current === pendingNavigationMapId) return;
+    navigationFlushMapId.current = pendingNavigationMapId;
+    void queue.flush();
+  }, [onNavigationFlush, pendingNavigationMapId, queue.flush, queue.status]);
 
   async function confirmRestore() {
     if (!revisionToRestore) return;
@@ -184,6 +188,11 @@ export function PrivateWorkspace() {
 
   function selectMap(mapId: string) {
     if (mapId === selectedMapId) return;
+    if (saveStatusRef.current === 'saved') {
+      setPendingMapId(null);
+      setSelectedMapId(mapId);
+      return;
+    }
     setPendingMapId(mapId);
   }
 
@@ -281,7 +290,7 @@ export function PrivateWorkspace() {
           <h1>{selectedMap?.title ?? 'Private workspace'}</h1>
         </div>
         <div className="workspace-header-status" data-save-status={saveStatus}>
-          <SaveStatus status={saveStatus} onRetry={['error', 'prunePending'].includes(saveStatus) ? retryActiveSave : undefined} />
+          <SaveStatus status={saveStatus} onRetry={['offlinePending', 'error', 'prunePending'].includes(saveStatus) ? retryActiveSave : undefined} />
         </div>
         {operationError ? <p className="workspace-operation-alert" role="alert">The map action could not be completed.</p> : null}
         <div className="workspace-header-actions" aria-label="Workspace actions">

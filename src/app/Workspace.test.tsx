@@ -257,6 +257,23 @@ describe('PrivateWorkspace', () => {
     expect(screen.queryByRole('dialog', { name: 'Discard unsaved changes?' })).not.toBeInTheDocument();
   });
 
+  it('switches a clean map immediately without queueing a navigation flush', () => {
+    mapList.current = {
+      maps: [
+        { ...makeMindMap({ title: 'Architecture', markdown: '# Architecture', currentRevisionAt: new Date() as never }), id: 'map-1' },
+        { ...makeMindMap({ title: 'Product', markdown: '# Product', currentRevisionAt: new Date() as never }), id: 'map-2' }
+      ],
+      loading: false,
+      error: null
+    };
+    render(<PrivateWorkspace />);
+
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Workspace navigation' })).getByRole('button', { name: 'Product' }));
+
+    expect(screen.getByRole('heading', { name: 'Product' })).toBeInTheDocument();
+    expect(mockedUpdateMindMapVersioned).not.toHaveBeenCalled();
+  });
+
   it('keeps the current map and draft when navigation flush reports an error', async () => {
     mockedUpdateMindMapVersioned.mockResolvedValueOnce({ status: 'error', error: new Error('offline') });
     mapList.current = {
@@ -276,6 +293,30 @@ describe('PrivateWorkspace', () => {
     expect(screen.getByRole('heading', { name: 'Architecture' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Active draft');
     expect(screen.queryByRole('dialog', { name: 'Discard unsaved changes?' })).not.toBeInTheDocument();
+  });
+
+  it('hands off to the retained navigation target after a failed flush is retried successfully', async () => {
+    mockedUpdateMindMapVersioned
+      .mockResolvedValueOnce({ status: 'error', error: new Error('offline') })
+      .mockResolvedValueOnce({ status: 'updated', contentVersion: 2 });
+    mapList.current = {
+      maps: [
+        { ...makeMindMap({ title: 'Architecture', markdown: '# Architecture', currentRevisionAt: new Date() as never }), id: 'map-1' },
+        { ...makeMindMap({ title: 'Product roadmap', markdown: '# Product roadmap', currentRevisionAt: new Date() as never }), id: 'map-2' }
+      ],
+      loading: false,
+      error: null
+    };
+    render(<PrivateWorkspace />);
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Markdown' }), { target: { value: '# Active draft' } });
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Workspace navigation' })).getByRole('button', { name: 'Product roadmap' }));
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Error'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Product roadmap' })).toBeInTheDocument());
+    expect(screen.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Product roadmap');
   });
 
   it('offers private search in the workspace and flushes an unsaved result selection', async () => {
