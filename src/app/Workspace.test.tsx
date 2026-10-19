@@ -341,16 +341,21 @@ describe('PrivateWorkspace', () => {
     expect(screen.getAllByText('No saved revisions yet.')).toHaveLength(2);
   });
 
-  it('exposes Retry for a failed save and invokes the queue retry path', async () => {
+  it('exposes Retry for a failed normal save and invokes the queue retry path', async () => {
     vi.useFakeTimers();
-    mockedCreateRevisionAndSaveMap
+    mockedUpdateMindMapVersioned
       .mockResolvedValueOnce({ status: 'error', error: new Error('temporary failure') })
-      .mockResolvedValueOnce({ status: 'saved', revisionId: 'revision-2', prunePending: false });
+      .mockResolvedValueOnce({ status: 'updated', contentVersion: 2 });
+    mapList.current = {
+      maps: [{ ...makeMindMap({ title: 'Architecture', currentRevisionAt: new Date() as never }), id: 'map-1' }],
+      loading: false,
+      error: null
+    };
     render(<PrivateWorkspace />);
 
     fireEvent.change(screen.getByRole('textbox', { name: 'Markdown' }), { target: { value: '# Retry draft' } });
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1500);
+      await vi.advanceTimersByTimeAsync(5000);
     });
     expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Save failed');
 
@@ -358,8 +363,8 @@ describe('PrivateWorkspace', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
       await Promise.resolve();
     });
-    expect(mockedCreateRevisionAndSaveMap).toHaveBeenCalledTimes(2);
-    expect(mockedCreateRevisionAndSaveMap).toHaveBeenLastCalledWith({}, expect.objectContaining({ reason: 'manual' }));
+    expect(mockedUpdateMindMapVersioned).toHaveBeenCalledTimes(2);
+    expect(mockedUpdateMindMapVersioned).toHaveBeenLastCalledWith({}, expect.objectContaining({ markdown: '# Retry draft' }));
     expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Saved');
     vi.useRealTimers();
   });

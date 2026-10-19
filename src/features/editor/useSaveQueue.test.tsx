@@ -2,7 +2,8 @@ import { act, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { makeMindMap } from '../../test/factories';
-import { useSaveQueue, type SaveRepository } from './useSaveQueue';
+import type { DraftRecoveryRecord, DraftRecoveryStore } from './draftRecoveryStore';
+import { useSaveQueue, type SaveQueue, type SaveRepository } from './useSaveQueue';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -12,24 +13,57 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function SaveQueueHarness({ repository, map = { id: 'map-1', ...makeMindMap() } }: {
+type QueueOptions = {
+  recoveryStore?: DraftRecoveryStore;
+  recoveryCoordinator?: {
+    writerId: string;
+    announceActive(uid: string, mapId: string): void;
+    clearActive(uid: string, mapId: string): void;
+    subscribeToLiveWriters(uid: string, mapId: string, listener: (writerIds: string[]) => void): () => void;
+  };
+};
+
+type QueueWithFlush = SaveQueue & { flush(): Promise<'saved' | 'error' | 'conflict'> };
+const useQueue = useSaveQueue as unknown as (map: ReturnType<typeof makeMindMap> & { id: string }, repository: SaveRepository, options?: QueueOptions) => QueueWithFlush;
+
+function SaveQueueHarness({ repository, map = { id: 'map-1', ...makeMindMap() }, options }: {
   repository: SaveRepository;
   map?: ReturnType<typeof makeMindMap> & { id: string };
+  options?: QueueOptions;
 }) {
-  const queue = useSaveQueue(map, repository);
+  const queue = useQueue(map, repository, options);
   return (
     <>
       <output data-testid="draft">{queue.draft}</output>
       <output data-testid="status">{queue.status}</output>
       <output data-testid="conflict">{queue.conflict ? `${queue.conflict.localMarkdown}|${queue.conflict.remoteMarkdown}` : ''}</output>
       <output data-testid="conflict-version">{queue.conflict?.remoteContentVersion ?? ''}</output>
+      <output data-testid="flush" />
       <button onClick={() => queue.setDraft('first draft')}>First</button>
       <button onClick={() => queue.setDraft('second draft')}>Second</button>
       <button onClick={() => queue.retry()}>Retry</button>
       <button onClick={() => queue.saveVersion()}>Save version</button>
       <button onClick={() => queue.resolveConflict('keepMine')}>Keep mine</button>
+      <button onClick={() => void queue.flush().then((outcome) => { document.querySelector('[data-testid="flush"]')!.textContent = outcome; })}>Flush</button>
     </>
   );
+}
+
+function recoveryRecord(overrides: Partial<DraftRecoveryRecord> = {}): DraftRecoveryRecord {
+  return { uid: 'owner-uid', mapId: 'map-1', writerId: 'writer-1', baseContentVersion: 1, markdown: '# recovered', generation: 1, recordVersion: 1, updatedAtMs: 1, ...overrides };
+}
+
+function recoveryOptions(records: DraftRecoveryRecord[] = []) {
+  const store: DraftRecoveryStore = {
+    list: vi.fn().mockResolvedValue(records),
+    put: vi.fn().mockImplementation(async (record: DraftRecoveryRecord) => { if (record.recordVersion === 0) record.recordVersion = record.generation; return true; }),
+    deleteIfCurrent: vi.fn().mockResolvedValue(true)
+  };
+  const coordinator = {
+    writerId: 'writer-1', announceActive: vi.fn(), clearActive: vi.fn(),
+    subscribeToLiveWriters: vi.fn((_uid: string, _mapId: string, listener: (writerIds: string[]) => void) => { listener([]); return () => undefined; })
+  };
+  return { options: { recoveryStore: store, recoveryCoordinator: coordinator }, store, coordinator };
 }
 
 describe('useSaveQueue', () => {
@@ -85,7 +119,7 @@ describe('useSaveQueue', () => {
 
     await act(async () => {
       screen.getByRole('button', { name: 'First' }).click();
-      await vi.advanceTimersByTimeAsync(1500);
+      await vi.advanceTimersByTimeAsync(5000);
     });
     expect(repository.update).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('status')).toHaveTextContent('saving');
@@ -111,7 +145,7 @@ describe('useSaveQueue', () => {
     vi.useRealTimers();
   });
 
-  it('starts autosave after 1.5 seconds idle', async () => {
+  it('starts autosave after 5 seconds idle', async () => {
     vi.useFakeTimers();
     const repository: SaveRepository = {
       update: vi.fn().mockResolvedValue({ status: 'updated', contentVersion: 2 })
@@ -120,7 +154,7 @@ describe('useSaveQueue', () => {
 
     screen.getByRole('button', { name: 'First' }).click();
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1499);
+      await vi.advanceTimersByTimeAsync(4999);
     });
     expect(repository.update).not.toHaveBeenCalled();
 
@@ -142,7 +176,7 @@ describe('useSaveQueue', () => {
 
     screen.getByRole('button', { name: 'First' }).click();
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1500);
+      await vi.advanceTimersByTimeAsync(5000);
     });
     expect(screen.getByTestId('status')).toHaveTextContent('error');
 
@@ -166,7 +200,7 @@ describe('useSaveQueue', () => {
 
     screen.getByRole('button', { name: 'First' }).click();
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1500);
+      await vi.advanceTimersByTimeAsync(5000);
     });
     expect(screen.getByTestId('status')).toHaveTextContent('offlinePending');
 
@@ -215,19 +249,19 @@ describe('useSaveQueue', () => {
     expect(screen.getByTestId('conflict')).toHaveTextContent('first draft|# Remote');
   });
 
-  it('opens the conflict state from a competing revision-save transaction using its confirmed remote map', async () => {
+  it('opens the conflict state from a competing normal map-save transaction using its confirmed remote map', async () => {
     vi.useFakeTimers();
     const staleMap = { id: 'map-1', ...makeMindMap({ markdown: '# Stale listener', contentVersion: 1 }) };
     const confirmedRemote = { id: 'map-1', ...makeMindMap({ markdown: '# Confirmed remote', contentVersion: 8 }) };
-    const saveRevision = vi.fn()
+    const update = vi.fn()
       .mockResolvedValueOnce({ status: 'conflict', remote: confirmedRemote })
-      .mockResolvedValueOnce({ status: 'saved', revisionId: 'revision-2', prunePending: false });
-    const repository: SaveRepository = { update: vi.fn(), saveRevision };
+      .mockResolvedValueOnce({ status: 'updated', contentVersion: 9 });
+    const repository: SaveRepository = { update };
     render(<SaveQueueHarness repository={repository} map={staleMap} />);
 
     screen.getByRole('button', { name: 'First' }).click();
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1500);
+      await vi.advanceTimersByTimeAsync(5000);
     });
 
     expect(screen.getByTestId('status')).toHaveTextContent('conflict');
@@ -238,7 +272,7 @@ describe('useSaveQueue', () => {
       screen.getByRole('button', { name: 'Keep mine' }).click();
       await Promise.resolve();
     });
-    expect(saveRevision).toHaveBeenLastCalledWith(expect.objectContaining({
+    expect(update).toHaveBeenLastCalledWith(expect.objectContaining({
       markdown: 'first draft',
       expectedContentVersion: 8
     }));
@@ -258,7 +292,7 @@ describe('useSaveQueue', () => {
 
     await act(async () => {
       screen.getByRole('button', { name: 'First' }).click();
-      await vi.advanceTimersByTimeAsync(1500);
+      await vi.advanceTimersByTimeAsync(5000);
     });
     expect(repository.update).toHaveBeenLastCalledWith(expect.objectContaining({ mapId: 'map-1', expectedContentVersion: 4 }));
 
@@ -274,10 +308,108 @@ describe('useSaveQueue', () => {
 
     await act(async () => {
       screen.getByRole('button', { name: 'First' }).click();
-      await vi.advanceTimersByTimeAsync(1500);
+      await vi.advanceTimersByTimeAsync(5000);
     });
     expect(repository.update).toHaveBeenLastCalledWith(expect.objectContaining({ mapId: 'map-2', expectedContentVersion: 1 }));
     newMapWrite.resolve({ status: 'updated', contentVersion: 2 });
     vi.useRealTimers();
+  });
+
+  it('does not autosave before 4,999 ms and saves at the 5,000 ms trailing boundary', async () => {
+    vi.useFakeTimers();
+    const update = vi.fn().mockResolvedValue({ status: 'updated', contentVersion: 2 });
+    render(<SaveQueueHarness repository={{ update }} />);
+    screen.getByRole('button', { name: 'First' }).click();
+    await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
+    expect(update).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ markdown: 'first draft' }));
+    vi.useRealTimers();
+  });
+
+  it('flushes continuous typing once at the 30-second max-wait deadline without waiting idle', async () => {
+    vi.useFakeTimers();
+    const update = vi.fn().mockResolvedValue({ status: 'updated', contentVersion: 2 });
+    render(<SaveQueueHarness repository={{ update }} />);
+    for (let second = 0; second < 30; second += 1) {
+      screen.getByRole('button', { name: second % 2 === 0 ? 'First' : 'Second' }).click();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    }
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ markdown: 'second draft' }));
+    vi.useRealTimers();
+  });
+
+  it('uses update for ordinary autosaves even when revision saving is available', async () => {
+    vi.useFakeTimers();
+    const update = vi.fn().mockResolvedValue({ status: 'updated', contentVersion: 2 });
+    const saveRevision = vi.fn().mockResolvedValue({ status: 'saved', revisionId: 'revision-1', prunePending: false });
+    render(<SaveQueueHarness repository={{ update, saveRevision }} map={{ id: 'map-1', ...makeMindMap({ currentRevisionAt: new Date() as never }) }} />);
+    screen.getByRole('button', { name: 'First' }).click();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ markdown: 'first draft' }));
+    expect(saveRevision).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('routes the next dirty flush through one autosnapshot when five minutes have elapsed', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-15T00:05:00.000Z'));
+    const update = vi.fn();
+    const saveRevision = vi.fn().mockResolvedValue({ status: 'saved', revisionId: 'revision-1', prunePending: false });
+    render(<SaveQueueHarness repository={{ update, saveRevision }} map={{ id: 'map-1', ...makeMindMap({ currentRevisionAt: new Date('2026-10-15T00:00:00.000Z') as never }) }} />);
+    screen.getByRole('button', { name: 'First' }).click();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(saveRevision).toHaveBeenCalledWith(expect.objectContaining({ markdown: 'first draft', reason: 'autosave' }));
+    expect(update).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('hydrates one compatible recovery record for the current writer', async () => {
+    const { options, coordinator } = recoveryOptions([recoveryRecord()]);
+    render(<SaveQueueHarness repository={{ update: vi.fn() }} options={options} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByTestId('draft')).toHaveTextContent('# recovered');
+    expect(screen.getByTestId('status')).toHaveTextContent('unsaved');
+    expect(coordinator.announceActive).toHaveBeenCalledWith('owner-uid', 'map-1');
+  });
+
+  it('opens a conflict instead of overwriting remote content for a stale recovery base version', async () => {
+    const { options } = recoveryOptions([recoveryRecord({ baseContentVersion: 2 })]);
+    render(<SaveQueueHarness repository={{ update: vi.fn() }} options={options} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByTestId('status')).toHaveTextContent('conflict');
+    expect(screen.getByTestId('conflict')).toHaveTextContent('# recovered|# Cloud foundations');
+  });
+
+  it('does not auto-hydrate divergent recovery drafts from multiple writers', async () => {
+    const { options } = recoveryOptions([recoveryRecord(), recoveryRecord({ writerId: 'writer-2', markdown: '# other writer' })]);
+    render(<SaveQueueHarness repository={{ update: vi.fn() }} options={options} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByTestId('status')).toHaveTextContent('conflict');
+    expect(screen.getByTestId('draft')).toHaveTextContent('# Cloud foundations');
+  });
+
+  it('deletes only this writer matching recovery record after confirming the latest generation', async () => {
+    vi.useFakeTimers();
+    const { options, store } = recoveryOptions();
+    const update = vi.fn().mockResolvedValue({ status: 'updated', contentVersion: 2 });
+    render(<SaveQueueHarness repository={{ update }} options={options} />);
+    await act(async () => { screen.getByRole('button', { name: 'First' }).click(); await vi.advanceTimersByTimeAsync(5000); await Promise.resolve(); });
+    expect(store.deleteIfCurrent).toHaveBeenCalledWith(expect.objectContaining({ uid: 'owner-uid', mapId: 'map-1', writerId: 'writer-1', generation: 1, recordVersion: 1 }));
+    vi.useRealTimers();
+  });
+
+  it('flush returns saved when clean, error after a failed immediate save, and conflict after a version conflict', async () => {
+    const { rerender } = render(<SaveQueueHarness repository={{ update: vi.fn() }} />);
+    await act(async () => { screen.getByRole('button', { name: 'Flush' }).click(); await Promise.resolve(); });
+    expect(screen.getByTestId('flush')).toHaveTextContent('saved');
+    rerender(<SaveQueueHarness repository={{ update: vi.fn().mockResolvedValue({ status: 'error', error: new Error('offline') }) }} />);
+    await act(async () => { screen.getByRole('button', { name: 'First' }).click(); screen.getByRole('button', { name: 'Flush' }).click(); await Promise.resolve(); });
+    expect(screen.getByTestId('flush')).toHaveTextContent('error');
+    const remote = { id: 'map-1', ...makeMindMap({ markdown: '# Remote', contentVersion: 2 }) };
+    rerender(<SaveQueueHarness repository={{ update: vi.fn().mockResolvedValue({ status: 'conflict', remote }) }} />);
+    await act(async () => { screen.getByRole('button', { name: 'First' }).click(); screen.getByRole('button', { name: 'Flush' }).click(); await Promise.resolve(); });
+    expect(screen.getByTestId('flush')).toHaveTextContent('conflict');
   });
 });

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { DraftRecoveryCoordinator } from './draftRecoveryCoordinator';
+import { createBrowserDraftRecoveryStore, type DraftRecoveryRecord, type DraftRecoveryStore } from './draftRecoveryStore';
 import type { RevisionReason } from '../history/revisionTypes';
 import type { SaveResult } from '../history/revisionRepository';
 import type { StoredMindMap, UpdateMindMapInput, UpdateResult } from '../mindmaps/mindMapRepository';
@@ -29,26 +31,46 @@ export type SaveQueue = {
   conflict: ConflictState | null;
   retry(): void;
   saveVersion(): void;
+  flush(): Promise<'saved' | 'error' | 'conflict'>;
   resolveConflict(choice: ConflictChoice): void;
 };
 
-const AUTOSAVE_DELAY_MS = 1500;
+export type SaveQueueOptions = {
+  recoveryStore?: DraftRecoveryStore;
+  recoveryCoordinator?: Pick<DraftRecoveryCoordinator, 'writerId' | 'announceActive' | 'clearActive' | 'subscribeToLiveWriters'>;
+};
+
+type SaveOutcome = 'saved' | 'error' | 'conflict';
+type SaveMode = 'normal' | 'manual';
+
+const AUTOSAVE_DELAY_MS = 5000;
+const AUTOSAVE_MAX_WAIT_MS = 30_000;
+const AUTOSNAPSHOT_INTERVAL_MS = 5 * 60_000;
 
 function isOffline(): boolean {
   return typeof navigator !== 'undefined' && navigator.onLine === false;
 }
 
-export function useSaveQueue(map: StoredMindMap, repository: SaveRepository): SaveQueue {
+export function useSaveQueue(map: StoredMindMap, repository: SaveRepository, options: SaveQueueOptions = {}): SaveQueue {
   const [draft, setDraftState] = useState(map.markdown);
   const [status, setStatus] = useState<SaveStatus>(map.revisionPrunePending ? 'prunePending' : 'saved');
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   const conflictRef = useRef<ConflictState | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dirtyCycleStartedAt = useRef<number | null>(null);
   const inFlight = useRef(false);
+  const inFlightSave = useRef<Promise<SaveOutcome> | null>(null);
+  const saveRef = useRef<((requestedMapSession?: number, mode?: SaveMode) => Promise<SaveOutcome>) | undefined>(undefined);
   const draftRef = useRef(map.markdown);
   const generation = useRef(0);
   const confirmedMarkdown = useRef(map.markdown);
   const confirmedVersion = useRef(map.contentVersion);
+  const latestRevisionAt = useRef(revisionTime(map.currentRevisionAt));
+  const recoveryRecord = useRef<DraftRecoveryRecord | null>(null);
+  const recoveryStore = useRef<DraftRecoveryStore>(undefined!);
+  const recoveryCoordinator = useRef<NonNullable<SaveQueueOptions['recoveryCoordinator']>>(undefined!);
+  if (recoveryStore.current === undefined) recoveryStore.current = options.recoveryStore ?? createBrowserDraftRecoveryStore();
+  if (recoveryCoordinator.current === undefined) recoveryCoordinator.current = options.recoveryCoordinator ?? new DraftRecoveryCoordinator();
   const activeMapId = useRef(map.id);
   const mapSession = useRef(0);
   const renderedMapId = useRef(map.id);
@@ -66,23 +88,31 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository): Sa
     }
   }, []);
 
-  const save = useCallback((requestedMapSession = mapSession.current, reason: RevisionReason = 'autosave') => {
+  const scheduleSave = useCallback(() => {
     clearTimer();
-    if (requestedMapSession !== mapSession.current || inFlight.current || conflictRef.current !== null) {
-      return;
+    if (dirtyCycleStartedAt.current === null) return;
+    const now = Date.now();
+    const deadline = dirtyCycleStartedAt.current + AUTOSAVE_MAX_WAIT_MS;
+    const delay = Math.max(0, Math.min(AUTOSAVE_DELAY_MS, deadline - now));
+    timer.current = setTimeout(() => { void saveRef.current?.(); }, delay);
+  }, [clearTimer]);
+
+  const save = useCallback((requestedMapSession = mapSession.current, mode: SaveMode = 'normal'): Promise<SaveOutcome> => {
+    clearTimer();
+    if (requestedMapSession !== mapSession.current) return Promise.resolve('error');
+    if (conflictRef.current !== null) return Promise.resolve('conflict');
+    if (inFlight.current) {
+      return (inFlightSave.current ?? Promise.resolve('error')).then(() => saveRef.current!(requestedMapSession, mode));
     }
-    if (draftRef.current === confirmedMarkdown.current && reason === 'autosave') {
+    if (draftRef.current === confirmedMarkdown.current && mode === 'normal') {
       setStatus('saved');
-      return;
+      return Promise.resolve('saved');
     }
 
     const savedGeneration = generation.current;
     const savedMarkdown = draftRef.current;
     const currentMap = mapRef.current;
     const savedMapSession = mapSession.current;
-    inFlight.current = true;
-    setStatus('saving');
-
     const saveInput = {
       ownerUid: currentMap.ownerUid,
       mapId: currentMap.id,
@@ -92,32 +122,38 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository): Sa
       markdown: savedMarkdown,
       contentSearchText: savedMarkdown.toLocaleLowerCase()
     };
-    const saveRequest = repository.saveRevision
-      ? repository.saveRevision({ ...saveInput, reason })
+    const shouldSaveRevision = Boolean(repository.saveRevision) && (mode === 'manual' || isAutosnapshotDue(latestRevisionAt.current));
+    inFlight.current = true;
+    setStatus('saving');
+    const request = shouldSaveRevision
+      ? repository.saveRevision!({ ...saveInput, reason: mode === 'manual' ? 'manual' : 'autosave' })
       : repository.update(saveInput);
-    void saveRequest.then((result) => {
-      if (savedMapSession !== mapSession.current || currentMap.id !== mapRef.current.id) {
-        return;
-      }
+    const completion = Promise.resolve(request).then((result): SaveOutcome | Promise<SaveOutcome> => {
+      if (savedMapSession !== mapSession.current || currentMap.id !== mapRef.current.id) return 'error';
       inFlight.current = false;
       if (result.status === 'updated' || result.status === 'saved') {
-        confirmedVersion.current = result.status === 'updated'
-          ? result.contentVersion
-          : saveInput.expectedContentVersion + 1;
-        if (savedGeneration === generation.current) {
-          confirmedMarkdown.current = savedMarkdown;
-          setStatus(result.status === 'saved' && result.prunePending ? 'prunePending' : 'saved');
-        } else {
+        confirmedVersion.current = result.status === 'updated' ? result.contentVersion : saveInput.expectedContentVersion + 1;
+        if (shouldSaveRevision) latestRevisionAt.current = Date.now();
+        if (savedGeneration !== generation.current) {
           setStatus('saving');
-          save(savedMapSession, 'autosave');
+          return saveRef.current!(savedMapSession);
         }
-        return;
+        confirmedMarkdown.current = savedMarkdown;
+        dirtyCycleStartedAt.current = null;
+        const record = recoveryRecord.current;
+        if (record && record.generation === savedGeneration) {
+          void recoveryStore.current.deleteIfCurrent(record);
+          recoveryRecord.current = null;
+        }
+        setStatus(result.status === 'saved' && result.prunePending ? 'prunePending' : 'saved');
+        return 'saved';
       }
       if (result.status === 'prune-pending') {
         confirmedVersion.current = saveInput.expectedContentVersion + 1;
         confirmedMarkdown.current = savedMarkdown;
+        dirtyCycleStartedAt.current = null;
         setStatus('prunePending');
-        return;
+        return 'saved';
       }
       if (result.status === 'conflict' && 'remote' in result) {
         conflictRef.current = {
@@ -127,26 +163,41 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository): Sa
         };
         setConflict(conflictRef.current);
         setStatus('conflict');
-        return;
+        return 'conflict';
       }
       setStatus(isOffline() ? 'offlinePending' : 'error');
-    }, () => {
-      if (savedMapSession !== mapSession.current || currentMap.id !== mapRef.current.id) {
-        return;
-      }
+      return 'error';
+    }, (): SaveOutcome => {
+      if (savedMapSession !== mapSession.current || currentMap.id !== mapRef.current.id) return 'error';
       inFlight.current = false;
       setStatus(isOffline() ? 'offlinePending' : 'error');
+      return 'error';
     });
+    inFlightSave.current = completion;
+    return completion;
   }, [clearTimer, repository]);
+  saveRef.current = save;
 
   const setDraft = useCallback((markdown: string) => {
-    clearTimer();
     draftRef.current = markdown;
     generation.current += 1;
+    if (dirtyCycleStartedAt.current === null) dirtyCycleStartedAt.current = Date.now();
     setDraftState(markdown);
     setStatus('unsaved');
-    timer.current = setTimeout(save, AUTOSAVE_DELAY_MS);
-  }, [clearTimer, save]);
+    const record: DraftRecoveryRecord = {
+      uid: mapRef.current.ownerUid,
+      mapId: mapRef.current.id,
+      writerId: recoveryCoordinator.current.writerId,
+      baseContentVersion: confirmedVersion.current,
+      markdown,
+      generation: generation.current,
+      recordVersion: 0,
+      updatedAtMs: Date.now()
+    };
+    recoveryRecord.current = record;
+    void recoveryStore.current.put(record);
+    scheduleSave();
+  }, [scheduleSave]);
 
   const retry = useCallback(() => {
     if (status === 'prunePending' && repository.retryRevisionPrune) {
@@ -166,11 +217,11 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository): Sa
       });
       return;
     }
-    save(mapSession.current, 'manual');
+    void save(mapSession.current);
   }, [repository, save, status]);
 
   const saveVersion = useCallback(() => {
-    save(mapSession.current, 'manual');
+    void save(mapSession.current, 'manual');
   }, [save]);
 
   const resolveConflict = useCallback((choice: ConflictChoice) => {
@@ -205,7 +256,10 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository): Sa
       draftRef.current = map.markdown;
       confirmedMarkdown.current = map.markdown;
       confirmedVersion.current = map.contentVersion;
+      latestRevisionAt.current = revisionTime(map.currentRevisionAt);
       generation.current = 0;
+      dirtyCycleStartedAt.current = null;
+      recoveryRecord.current = null;
       setDraftState(map.markdown);
       setStatus(map.revisionPrunePending ? 'prunePending' : 'saved');
       return;
@@ -228,17 +282,79 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository): Sa
     draftRef.current = map.markdown;
     confirmedMarkdown.current = map.markdown;
     confirmedVersion.current = map.contentVersion;
+    latestRevisionAt.current = revisionTime(map.currentRevisionAt);
     setDraftState(map.markdown);
     setStatus(map.revisionPrunePending ? 'prunePending' : 'saved');
   }, [clearTimer, map.id, map.contentVersion, map.markdown, map.revisionPrunePending]);
 
   useEffect(() => {
-    const retryWhenOnline = () => save();
+    const store = recoveryStore.current;
+    const coordinator = recoveryCoordinator.current;
+    const recoveryMap = mapRef.current;
+    const recoverySession = mapSession.current;
+    let active = true;
+    coordinator.announceActive(recoveryMap.ownerUid, recoveryMap.id);
+    const openRecoveryConflict = (record: DraftRecoveryRecord) => {
+      if (!active || recoverySession !== mapSession.current) return;
+      const nextConflict = {
+        localMarkdown: record.markdown,
+        remoteMarkdown: recoveryMap.markdown,
+        remoteContentVersion: recoveryMap.contentVersion
+      };
+      conflictRef.current = nextConflict;
+      setConflict(nextConflict);
+      setStatus('conflict');
+    };
+    let liveSecondWriter = false;
+    const unsubscribe = coordinator.subscribeToLiveWriters(recoveryMap.ownerUid, recoveryMap.id, (writerIds) => {
+      liveSecondWriter = writerIds.some((writerId) => writerId !== coordinator.writerId);
+    });
+    void store.list(recoveryMap.ownerUid, recoveryMap.id).then((records) => {
+      if (!active || recoverySession !== mapSession.current) return;
+      const ownRecords = records.filter((record) => record.writerId === coordinator.writerId);
+      const ownRecord = ownRecords.length === 1 ? ownRecords[0] : undefined;
+      if (!ownRecord) return;
+      if (ownRecord.markdown === recoveryMap.markdown) {
+        void store.deleteIfCurrent(ownRecord);
+        return;
+      }
+      if (liveSecondWriter || records.length !== 1 || ownRecord.baseContentVersion !== recoveryMap.contentVersion) {
+        openRecoveryConflict(ownRecord);
+        return;
+      }
+      recoveryRecord.current = ownRecord;
+      draftRef.current = ownRecord.markdown;
+      generation.current = ownRecord.generation;
+      dirtyCycleStartedAt.current = Date.now();
+      setDraftState(ownRecord.markdown);
+      setStatus('unsaved');
+      scheduleSave();
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+      coordinator.clearActive(recoveryMap.ownerUid, recoveryMap.id);
+    };
+  }, [map.id, map.contentVersion, map.markdown, scheduleSave]);
+
+  useEffect(() => {
+    const retryWhenOnline = () => { void save(); };
     window.addEventListener('online', retryWhenOnline);
     return () => window.removeEventListener('online', retryWhenOnline);
   }, [save]);
 
   useEffect(() => () => clearTimer(), [clearTimer]);
 
-  return { draft, setDraft, status, conflict, retry, saveVersion, resolveConflict };
+  const flush = useCallback(() => save(mapSession.current), [save]);
+
+  return { draft, setDraft, status, conflict, retry, saveVersion, flush, resolveConflict };
+}
+
+function revisionTime(value: StoredMindMap['currentRevisionAt']): number | null {
+  if (value === null) return null;
+  return value instanceof Date ? value.getTime() : value.toMillis();
+}
+
+function isAutosnapshotDue(lastRevisionAt: number | null): boolean {
+  return lastRevisionAt === null || Date.now() - lastRevisionAt >= AUTOSNAPSHOT_INTERVAL_MS;
 }
