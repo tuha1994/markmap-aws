@@ -41,34 +41,37 @@ type MapWorkspaceProps = {
   layout: WorkspaceLayout;
   onStatus(status: SaveStatusValue): void;
   onRetryChange(retry: (() => void) | null): void;
+  pendingNavigationMapId: string | null;
+  onNavigationFlush(mapId: string, result: 'saved' | 'error' | 'conflict'): void;
 };
 
 function EmptyPane({ label, children }: { label: string; children: ReactNode }) {
   return <section aria-label={label}>{children}</section>;
 }
 
-function MapWorkspace({ sidebar, map, database, layout, onStatus, onRetryChange }: MapWorkspaceProps) {
+function MapWorkspace({ sidebar, map, database, layout, onStatus, onRetryChange, pendingNavigationMapId, onNavigationFlush }: MapWorkspaceProps) {
   if (!map) {
     const editor = <EmptyPane label="Markdown editor"><p>Select or create a map to begin editing.</p></EmptyPane>;
     const preview = <EmptyPane label="Preview pane"><p>A preview appears after a map is selected.</p></EmptyPane>;
     return <><AppShell sidebar={sidebar} editor={editor} preview={preview} mode={layout.mode} sidebarCollapsed={layout.sidebarCollapsed} onModeChange={layout.setMode} onSidebarCollapsedChange={layout.setSidebarCollapsed} /><ResponsivePaneTabs maps={sidebar} editor={editor} preview={preview} focusMode={layout.mode === 'focus'} /></>;
   }
 
-  return <SelectedMapWorkspace key={map.id} sidebar={sidebar} map={map} database={database} layout={layout} onStatus={onStatus} onRetryChange={onRetryChange} />;
+  return <SelectedMapWorkspace key={map.id} sidebar={sidebar} map={map} database={database} layout={layout} onStatus={onStatus} onRetryChange={onRetryChange} pendingNavigationMapId={pendingNavigationMapId} onNavigationFlush={onNavigationFlush} />;
 }
 
-function SelectedMapWorkspace({ sidebar, map, database, layout, onStatus, onRetryChange }: Omit<MapWorkspaceProps, 'map'> & { map: StoredMindMap }) {
+function SelectedMapWorkspace({ sidebar, map, database, layout, onStatus, onRetryChange, pendingNavigationMapId, onNavigationFlush }: Omit<MapWorkspaceProps, 'map'> & { map: StoredMindMap }) {
   const repository = useMemo(() => ({
     update: (input: Parameters<typeof updateMindMapVersioned>[1]) => updateMindMapVersioned(database, input),
     saveRevision: (input: Parameters<typeof createRevisionAndSaveMap>[1]) => createRevisionAndSaveMap(database, input),
     retryRevisionPrune: (mapId: string) => retryRevisionPrune(database, mapId)
   }), [database]);
   const queue = useSaveQueue(map, repository);
+  const handledNavigationMapId = useRef<string | null>(null);
   const [revisions, setRevisions] = useState<StoredRevision[]>([]);
   const [revisionToRestore, setRevisionToRestore] = useState<StoredRevision | null>(null);
   const [restoreBusy, setRestoreBusy] = useState(false);
   const [restoreError, setRestoreError] = useState(false);
-  useDirtyGuard(queue.status === 'unsaved' || queue.status === 'offlinePending' || queue.status === 'error');
+  useDirtyGuard(queue.status);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +87,15 @@ function SelectedMapWorkspace({ sidebar, map, database, layout, onStatus, onRetr
     onRetryChange(() => queue.retry());
     return () => onRetryChange(null);
   }, [onRetryChange, queue.retry]);
+  useEffect(() => {
+    if (!pendingNavigationMapId) {
+      handledNavigationMapId.current = null;
+      return;
+    }
+    if (handledNavigationMapId.current === pendingNavigationMapId) return;
+    handledNavigationMapId.current = pendingNavigationMapId;
+    void queue.flush().then((result) => onNavigationFlush(pendingNavigationMapId, result));
+  }, [onNavigationFlush, pendingNavigationMapId, queue.flush]);
 
   async function confirmRestore() {
     if (!revisionToRestore) return;
@@ -139,6 +151,7 @@ export function PrivateWorkspace() {
   const saveStatusRef = useRef<SaveStatusValue>('saved');
   const [importOpen, setImportOpen] = useState(false);
   const saveRetry = useRef<(() => void) | null>(null);
+
   const [operationError, setOperationError] = useState(false);
   const handleSaveStatus = useCallback((status: SaveStatusValue) => {
     saveStatusRef.current = status;
@@ -147,6 +160,11 @@ export function PrivateWorkspace() {
   const handleSaveRetryChange = useCallback((retry: (() => void) | null) => {
     saveRetry.current = retry;
   }, []);
+  const handleNavigationFlush = useCallback((mapId: string, result: 'saved' | 'error' | 'conflict') => {
+    if (result !== 'saved' || pendingMapId !== mapId) return;
+    setPendingMapId(null);
+    setSelectedMapId(mapId);
+  }, [pendingMapId]);
   const retryActiveSave = useCallback(() => saveRetry.current?.(), []);
   const client = getFirebaseClient();
   const selectedMap = maps.find((map) => map.id === selectedMapId) ?? null;
@@ -166,17 +184,7 @@ export function PrivateWorkspace() {
 
   function selectMap(mapId: string) {
     if (mapId === selectedMapId) return;
-    if (saveStatus !== 'saved') {
-      setPendingMapId(mapId);
-      return;
-    }
-    setSelectedMapId(mapId);
-  }
-
-  function discardAndSelectMap() {
-    if (!pendingMapId) return;
-    setSelectedMapId(pendingMapId);
-    setPendingMapId(null);
+    setPendingMapId(mapId);
   }
 
   async function createMap(title: string) {
@@ -282,7 +290,7 @@ export function PrivateWorkspace() {
           <button type="button" onClick={() => void signOut()}>Sign out</button>
         </div>
       </header>
-      <MapWorkspace sidebar={sidebar} map={selectedMap} database={client.firestore} layout={layout} onStatus={handleSaveStatus} onRetryChange={handleSaveRetryChange} />
+      <MapWorkspace sidebar={sidebar} map={selectedMap} database={client.firestore} layout={layout} onStatus={handleSaveStatus} onRetryChange={handleSaveRetryChange} pendingNavigationMapId={pendingMapId} onNavigationFlush={handleNavigationFlush} />
       {importOpen ? <ImportDialog onImport={importMap} onCancel={() => setImportOpen(false)} /> : null}
       {pendingFolder ? (
         <DeleteFolderDialog
@@ -294,25 +302,7 @@ export function PrivateWorkspace() {
           busy={folderOperationBusy}
         />
       ) : null}
-      {pendingMapId ? (
-        <section role="dialog" aria-modal="true" aria-label="Discard unsaved changes?">
-          <p>Your unsaved draft will be discarded if you switch maps.</p>
-          <button
-            autoFocus
-            type="button"
-            onClick={() => setPendingMapId(null)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape' || event.key === 'Enter') {
-                event.preventDefault();
-                setPendingMapId(null);
-              }
-            }}
-          >
-            Keep editing
-          </button>
-          <button type="button" onClick={discardAndSelectMap}>Discard and switch</button>
-        </section>
-      ) : null}
+
     </main>
   );
 }

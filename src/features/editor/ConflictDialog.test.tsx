@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ConflictDialog } from './ConflictDialog';
 
 describe('ConflictDialog', () => {
-  it('retains local and remote Markdown until the user explicitly chooses Keep mine or Use remote', () => {
+  it('identifies a competing draft and retains both drafts until the user explicitly chooses one', () => {
     const onResolve = vi.fn();
     render(
       <ConflictDialog
@@ -16,13 +16,14 @@ describe('ConflictDialog', () => {
 
     expect(screen.getByText('# Local draft')).toBeInTheDocument();
     expect(screen.getByText('# Remote draft')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Conflicting draft detected' })).toHaveTextContent('competing draft');
     expect(onResolve).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Keep mine' }));
     expect(onResolve).toHaveBeenCalledWith('keepMine');
   });
 
-  it('tabs from Keep mine to Use remote and wraps forward within the modal', () => {
+  it('tabs from Keep mine to Use competing draft and wraps forward within the modal', () => {
     const onResolve = vi.fn();
     render(
       <>
@@ -36,7 +37,7 @@ describe('ConflictDialog', () => {
     );
 
     const keepMine = screen.getByRole('button', { name: 'Keep mine' });
-    const useRemote = screen.getByRole('button', { name: 'Use remote' });
+    const useRemote = screen.getByRole('button', { name: 'Use competing draft' });
     const backgroundAction = screen.getByRole('button', { name: 'Background action' });
     expect(keepMine).toHaveFocus();
 
@@ -48,7 +49,7 @@ describe('ConflictDialog', () => {
     expect(backgroundAction).not.toHaveFocus();
   });
 
-  it('reverse-tabs from Keep mine to Use remote and never resolves on Escape', () => {
+  it('reverse-tabs from Keep mine to Use competing draft and never resolves on Escape', () => {
     const onResolve = vi.fn();
     render(
       <ConflictDialog
@@ -58,9 +59,9 @@ describe('ConflictDialog', () => {
       />
     );
 
-    const dialog = screen.getByRole('dialog', { name: 'Remote change detected' });
+    const dialog = screen.getByRole('dialog', { name: 'Conflicting draft detected' });
     const keepMine = screen.getByRole('button', { name: 'Keep mine' });
-    const useRemote = screen.getByRole('button', { name: 'Use remote' });
+    const useRemote = screen.getByRole('button', { name: 'Use competing draft' });
     expect(dialog).toHaveAttribute('aria-modal', 'true');
     expect(keepMine).toHaveFocus();
 

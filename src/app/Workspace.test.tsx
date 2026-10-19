@@ -200,7 +200,7 @@ describe('PrivateWorkspace', () => {
     await waitFor(() => expect(mockedCreateMindMap).toHaveBeenCalledOnce());
 
     fireEvent.change(screen.getByRole('textbox', { name: 'Markdown' }), { target: { value: '# Active draft' } });
-    await waitFor(() => expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Unsaved changes'));
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Unsaved'));
     await act(async () => finishCreate());
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Save the current draft before importing.'));
@@ -232,12 +232,12 @@ describe('PrivateWorkspace', () => {
     expect(screen.queryByRole('textbox', { name: 'Search private maps' })).not.toBeInTheDocument();
   });
 
-  it('keeps a draft when another map is selected before autosave unless discard is confirmed', async () => {
-    vi.useFakeTimers();
+  it('flushes a dirty draft and switches maps automatically after the save confirms', async () => {
+
     mapList.current = {
       maps: [
-        { ...makeMindMap({ title: 'Architecture', markdown: '# Architecture' }), id: 'map-1' },
-        { ...makeMindMap({ title: 'Product', markdown: '# Product' }), id: 'map-2' }
+        { ...makeMindMap({ title: 'Architecture', markdown: '# Architecture', currentRevisionAt: new Date() as never }), id: 'map-1' },
+        { ...makeMindMap({ title: 'Product', markdown: '# Product', currentRevisionAt: new Date() as never }), id: 'map-2' }
       ],
       loading: false,
       error: null
@@ -246,43 +246,43 @@ describe('PrivateWorkspace', () => {
 
     const navigation = within(screen.getByRole('complementary', { name: 'Workspace navigation' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Markdown' }), { target: { value: '# Active draft' } });
-    expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Unsaved changes');
+    expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Unsaved');
 
     fireEvent.click(navigation.getByRole('button', { name: 'Product' }));
-    const discardDialog = screen.getByRole('dialog', { name: 'Discard unsaved changes?' });
-    const keepEditing = within(discardDialog).getByRole('button', { name: 'Keep editing' });
-    expect(keepEditing).toHaveFocus();
-
-    fireEvent.keyDown(keepEditing, { key: 'Escape' });
-    expect(screen.queryByRole('dialog', { name: 'Discard unsaved changes?' })).not.toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Active draft');
-
-    fireEvent.click(navigation.getByRole('button', { name: 'Product' }));
-    const reopenedDiscardDialog = screen.getByRole('dialog', { name: 'Discard unsaved changes?' });
-    const reopenedKeepEditing = within(reopenedDiscardDialog).getByRole('button', { name: 'Keep editing' });
-    expect(reopenedKeepEditing).toHaveFocus();
-    fireEvent.keyDown(reopenedKeepEditing, { key: 'Enter' });
-    expect(screen.queryByRole('dialog', { name: 'Discard unsaved changes?' })).not.toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Active draft');
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1499);
-    });
-    expect(screen.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Active draft');
-    expect(mockedUpdateMindMapVersioned).not.toHaveBeenCalled();
-
-    fireEvent.click(navigation.getByRole('button', { name: 'Product' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Discard and switch' }));
+    await waitFor(() => expect(mockedUpdateMindMapVersioned).toHaveBeenCalledWith({}, expect.objectContaining({
+      mapId: 'map-1', markdown: '# Active draft'
+    })));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Product' })).toBeInTheDocument());
     expect(screen.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Product');
-    expect(mockedUpdateMindMapVersioned).not.toHaveBeenCalled();
-    vi.useRealTimers();
+    expect(screen.queryByRole('dialog', { name: 'Discard unsaved changes?' })).not.toBeInTheDocument();
   });
 
-  it('offers private search in the workspace and applies the unsaved selection guard to a result', () => {
+  it('keeps the current map and draft when navigation flush reports an error', async () => {
+    mockedUpdateMindMapVersioned.mockResolvedValueOnce({ status: 'error', error: new Error('offline') });
+    mapList.current = {
+      maps: [
+        { ...makeMindMap({ title: 'Architecture', markdown: '# Architecture', currentRevisionAt: new Date() as never }), id: 'map-1' },
+        { ...makeMindMap({ title: 'Product roadmap', markdown: '# Product roadmap', currentRevisionAt: new Date() as never }), id: 'map-2' }
+      ],
+      loading: false,
+      error: null
+    };
+    render(<PrivateWorkspace />);
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Markdown' }), { target: { value: '# Active draft' } });
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Workspace navigation' })).getByRole('button', { name: 'Product roadmap' }));
+
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Error'));
+    expect(screen.getByRole('heading', { name: 'Architecture' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Active draft');
+    expect(screen.queryByRole('dialog', { name: 'Discard unsaved changes?' })).not.toBeInTheDocument();
+  });
+
+  it('offers private search in the workspace and flushes an unsaved result selection', async () => {
     mapList.current = {
       maps: [
         { ...makeMindMap({ title: 'Architecture', markdown: '# Architecture' }), id: 'map-1' },
-        { ...makeMindMap({ title: 'Product roadmap', markdown: '# Product roadmap' }), id: 'map-2' }
+        { ...makeMindMap({ title: 'Product roadmap', markdown: '# Product roadmap', currentRevisionAt: new Date() as never }), id: 'map-2' }
       ],
       loading: false,
       error: null
@@ -295,8 +295,7 @@ describe('PrivateWorkspace', () => {
     fireEvent.change(within(search).getByRole('textbox', { name: 'Search private maps' }), { target: { value: 'roadmap' } });
     fireEvent.click(within(search).getByRole('button', { name: 'Product roadmap' }));
 
-    expect(screen.getByRole('dialog', { name: 'Discard unsaved changes?' })).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Active draft');
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Product roadmap' })).toBeInTheDocument());
   });
 
   it('opens safe folder archive from workspace navigation and requires an explicit destination', async () => {
@@ -336,12 +335,14 @@ describe('PrivateWorkspace', () => {
 
     await waitFor(() => expect(screen.getAllByRole('button', { name: 'Restore Architecture revision' })).toHaveLength(2));
     fireEvent.click(within(screen.getByRole('complementary', { name: 'Workspace navigation' })).getByRole('button', { name: 'Product' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Product' })).toBeInTheDocument());
 
     expect(screen.queryAllByRole('button', { name: 'Restore Architecture revision' })).toHaveLength(0);
     expect(screen.getAllByText('No saved revisions yet.')).toHaveLength(2);
   });
 
   it('exposes Retry for a failed normal save and invokes the queue retry path', async () => {
+
     vi.useFakeTimers();
     mockedUpdateMindMapVersioned
       .mockResolvedValueOnce({ status: 'error', error: new Error('temporary failure') })
@@ -357,11 +358,14 @@ describe('PrivateWorkspace', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
-    expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Save failed');
+    expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Error');
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
       await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
     });
     expect(mockedUpdateMindMapVersioned).toHaveBeenCalledTimes(2);
     expect(mockedUpdateMindMapVersioned).toHaveBeenLastCalledWith({}, expect.objectContaining({ markdown: '# Retry draft' }));

@@ -41,18 +41,18 @@ export function ConflictDialog({ localMarkdown, remoteMarkdown, onResolve }: Pro
       }}
     >
       <div className="conflict-dialog-panel">
-        <h2 id="conflict-title">Remote change detected</h2>
-        <p>Your local draft and the remote version are both preserved until you choose one.</p>
+        <h2 id="conflict-title">Conflicting draft detected</h2>
+        <p>Your local draft and the competing draft are both preserved until you choose one.</p>
         <section aria-label="Your draft">
           <h3>Your draft</h3>
           <pre>{localMarkdown}</pre>
         </section>
-        <section aria-label="Remote version">
-          <h3>Remote version</h3>
+        <section aria-label="Competing draft">
+          <h3>Competing draft</h3>
           <pre>{remoteMarkdown}</pre>
         </section>
         <button ref={keepMineRef} type="button" onClick={() => onResolve('keepMine')}>Keep mine</button>
-        <button ref={useRemoteRef} type="button" onClick={() => onResolve('useRemote')}>Use remote</button>
+        <button ref={useRemoteRef} type="button" onClick={() => onResolve('useRemote')}>Use competing draft</button>
       </div>
     </section>
   );

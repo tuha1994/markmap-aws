@@ -1,8 +1,14 @@
 import { useEffect } from 'react';
 
-export function useDirtyGuard(isDirty: boolean): void {
+import type { SaveStatus } from './useSaveQueue';
+
+function needsUnloadProtection(status: SaveStatus): boolean {
+  return ['unsaved', 'saving', 'offlinePending', 'error', 'conflict'].includes(status);
+}
+
+export function useDirtyGuard(status: SaveStatus): void {
   useEffect(() => {
-    if (!isDirty) {
+    if (!needsUnloadProtection(status)) {
       return;
     }
 
@@ -12,5 +18,5 @@ export function useDirtyGuard(isDirty: boolean): void {
     };
     window.addEventListener('beforeunload', warnBeforeUnload);
     return () => window.removeEventListener('beforeunload', warnBeforeUnload);
-  }, [isDirty]);
+  }, [status]);
 }

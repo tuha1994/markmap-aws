@@ -4,11 +4,17 @@ import { describe, expect, it } from 'vitest';
 import { SaveStatus } from './SaveStatus';
 
 describe('SaveStatus', () => {
-  it('labels offline drafts as in-memory-only and not recoverable after refresh or browser crash', () => {
-    render(<SaveStatus status="offlinePending" />);
+  it.each([
+    ['saved', 'Saved'],
+    ['saving', 'Saving'],
+    ['unsaved', 'Unsaved'],
+    ['offlinePending', 'Error'],
+    ['error', 'Error'],
+    ['conflict', 'Error'],
+    ['prunePending', 'Saved']
+  ] as const)('maps detailed %s state to compact %s status', (status, label) => {
+    render(<SaveStatus status={status} />);
 
-    expect(screen.getByText('Offline — changes pending')).toBeInTheDocument();
-    expect(screen.getByText(/only in this browser session/i)).toBeInTheDocument();
-    expect(screen.getByText(/refresh, closing this tab, or a browser crash can lose them/i)).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent(label);
   });
 });

@@ -106,9 +106,10 @@ describe('PrivateWorkspace cross-feature integration', () => {
     fireEvent.change(searchInput, { target: { value: 'roadmap' } });
     await waitFor(() => expect(screen.getAllByRole('button', { name: 'Product roadmap' })).toHaveLength(3));
     fireEvent.click(screen.getAllByRole('button', { name: 'Product roadmap' })[0]);
-    expect(screen.getByRole('heading', { name: 'Product roadmap' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Product roadmap' })).toBeInTheDocument());
     navigation = screen.getByRole('complementary', { name: 'Workspace navigation' });
     fireEvent.click(within(navigation).getByRole('button', { name: 'Architecture' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Architecture' })).toBeInTheDocument());
 
     await waitFor(() => expect(screen.getAllByRole('button', { name: 'Restore Architecture version' })).toHaveLength(2));
     fireEvent.click(screen.getAllByRole('button', { name: 'Restore Architecture version' })[0]);
@@ -130,10 +131,10 @@ describe('PrivateWorkspace cross-feature integration', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Markdown' }), { target: { value: '# Local device draft' } });
     fireEvent.click(screen.getAllByRole('button', { name: 'Save version' })[0]);
 
-    const conflict = await screen.findByRole('dialog', { name: 'Remote change detected' });
+    const conflict = await screen.findByRole('dialog', { name: 'Conflicting draft detected' });
     expect(within(conflict).getByText('# Local device draft')).toBeInTheDocument();
     expect(within(conflict).getByText('# Remote device draft')).toBeInTheDocument();
-    fireEvent.click(within(conflict).getByRole('button', { name: 'Use remote' }));
+    fireEvent.click(within(conflict).getByRole('button', { name: 'Use competing draft' }));
     expect(screen.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Remote device draft');
   });
 });
