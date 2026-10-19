@@ -92,19 +92,23 @@ test('renders access denial after a signed-in unapproved user is denied their au
   await expect(page.getByRole('main', { name: 'Markmap AWS workspace' })).toHaveCount(0);
 });
 
-test('keeps all mobile workspace header actions at least 44px at 360px', async ({ page }) => {
-  await page.setViewportSize({ width: 360, height: 800 });
-  await page.goto('./');
-
-  await signInToLocalWorkspace(page);
-  const headerActions = page.getByLabel('Workspace actions');
+async function expectMobileHeaderTargets(headerActions: ReturnType<Page['getByLabel']>) {
   for (const name of ['Import Markdown', /Switch to (dark|light) theme/, 'Sign out']) {
     const action = headerActions.getByRole('button', { name });
+    await expect(action).toBeVisible();
     const box = await action.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.width).toBeGreaterThanOrEqual(44);
     expect(box!.height).toBeGreaterThanOrEqual(44);
   }
+}
+
+test('keeps all mobile workspace header actions at least 44px at 360px', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.goto('./');
+
+  await signInToLocalWorkspace(page);
+  await expectMobileHeaderTargets(page.getByLabel('Workspace actions'));
 });
 
 test('keeps only mobile panes and 44px actions operable at 360px', async ({ page }) => {
