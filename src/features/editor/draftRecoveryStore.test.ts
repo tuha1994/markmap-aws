@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
+  createBrowserDraftRecoveryStore,
   createDraftRecoveryStore,
   type DraftRecoveryRecord,
   type DraftRecoveryIdentity,
@@ -124,5 +125,27 @@ describe('DraftRecoveryStore', () => {
 
     await expect(store.put(stale)).resolves.toBe(false);
     await expect(store.list('user-a', 'map-1')).resolves.toEqual([]);
+  });
+
+  it('resolves safely and retries after blocked and rejected IndexedDB opens', async () => {
+    const open = vi.fn(() => {
+      const request = {} as IDBOpenDBRequest;
+      queueMicrotask(() => {
+        if (open.mock.calls.length === 1) request.onblocked?.call(request, {} as IDBVersionChangeEvent);
+        else request.onerror?.call(request, new Event('error'));
+      });
+      return request;
+    });
+    vi.stubGlobal('indexedDB', { open });
+    const store = createBrowserDraftRecoveryStore();
+
+    try {
+      await expect(store.list('user-a', 'map-1')).resolves.toEqual([]);
+      await expect(store.put(record())).resolves.toBe(false);
+      await expect(store.deleteIfCurrent(record())).resolves.toBe(false);
+      expect(open).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

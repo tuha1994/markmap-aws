@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   DraftRecoveryCoordinator,
@@ -94,6 +94,32 @@ describe('DraftRecoveryCoordinator', () => {
     unsubscribe();
   });
 
+  it('discovers an already-active same-map writer when a tab subscribes late', () => {
+    const channels = new MemoryChannelHub();
+    const active = new DraftRecoveryCoordinator({
+      sessionStorage: new MemorySessionStorage(),
+      channelFactory: channels,
+      createWriterId: () => 'writer-active'
+    });
+    active.announceActive('user-a', 'map-1');
+    const late = new DraftRecoveryCoordinator({
+      sessionStorage: new MemorySessionStorage(),
+      channelFactory: channels,
+      createWriterId: () => 'writer-late'
+    });
+    const snapshots: string[][] = [];
+
+    const unsubscribe = late.subscribeToLiveWriters('user-a', 'map-1', (writerIds) => snapshots.push(writerIds));
+
+    expect(snapshots).toEqual([[], ['writer-active']]);
+    expect(channels.postedMessages).toEqual([
+      { type: 'active', uid: 'user-a', mapId: 'map-1', writerId: 'writer-active' },
+      { type: 'hello', uid: 'user-a', mapId: 'map-1', writerId: 'writer-late' },
+      { type: 'active', uid: 'user-a', mapId: 'map-1', writerId: 'writer-active' }
+    ]);
+    unsubscribe();
+  });
+
   it('broadcasts only advisory UID, map, and writer metadata', () => {
     const channels = new MemoryChannelHub();
     const coordinator = new DraftRecoveryCoordinator({
@@ -123,5 +149,30 @@ describe('DraftRecoveryCoordinator', () => {
 
     expect(coordinator.writerId).toBe('ephemeral-writer');
     expect(updates).toEqual([[]]);
+  });
+
+  it('remains usable when the browser BroadcastChannel constructor throws', () => {
+    vi.stubGlobal('BroadcastChannel', class {
+      constructor() {
+        throw new Error('BroadcastChannel blocked');
+      }
+    });
+
+    try {
+      const coordinator = new DraftRecoveryCoordinator({
+        sessionStorage: new MemorySessionStorage(),
+        createWriterId: () => 'ephemeral-writer'
+      });
+      const updates: string[][] = [];
+
+      const unsubscribe = coordinator.subscribeToLiveWriters('user-a', 'map-1', (writerIds) => updates.push(writerIds));
+      coordinator.announceActive('user-a', 'map-1');
+      coordinator.clearActive('user-a', 'map-1');
+      unsubscribe();
+
+      expect(updates).toEqual([[]]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

@@ -140,13 +140,40 @@ export class IndexedDbRecoveryStorageAdapter implements RecoveryStorageAdapter {
           request.onblocked = () => reject(new Error('IndexedDB recovery store upgrade is blocked'));
         });
       }
+      const pendingOpen = this.databasePromise;
+      void pendingOpen.catch(() => {
+        if (this.databasePromise === pendingOpen) this.databasePromise = undefined;
+      });
     }
     return this.databasePromise;
   }
 }
 
 export function createBrowserDraftRecoveryStore(): DraftRecoveryStore {
-  return createDraftRecoveryStore(new IndexedDbRecoveryStorageAdapter());
+  const store = createDraftRecoveryStore(new IndexedDbRecoveryStorageAdapter());
+  return {
+    async list(uid, mapId) {
+      try {
+        return await store.list(uid, mapId);
+      } catch {
+        return [];
+      }
+    },
+    async put(record) {
+      try {
+        return await store.put(record);
+      } catch {
+        return false;
+      }
+    },
+    async deleteIfCurrent(identity) {
+      try {
+        return await store.deleteIfCurrent(identity);
+      } catch {
+        return false;
+      }
+    }
+  };
 }
 
 function keyFor(record: DraftRecoveryKey): [string, string, string] {

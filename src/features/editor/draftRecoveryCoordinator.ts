@@ -20,7 +20,7 @@ export interface DraftRecoveryCoordinatorOptions {
 }
 
 type ActiveWriterMessage = {
-  type: 'active' | 'clear';
+  type: 'active' | 'clear' | 'hello';
   uid: string;
   mapId: string;
   writerId: string;
@@ -37,21 +37,28 @@ const CHANNEL_NAME = 'markmap-aws:draft-recovery';
 export class DraftRecoveryCoordinator {
   readonly writerId: string;
   private readonly channel: DraftRecoveryChannel | undefined;
+  private readonly activeMapKeys = new Set<string>();
   private readonly liveWriterIdsByMap = new Map<string, Set<string>>();
   private readonly subscribersByMap = new Map<string, Set<(writerIds: string[]) => void>>();
 
   constructor(options: DraftRecoveryCoordinatorOptions = {}) {
     const sessionStorage = options.sessionStorage ?? browserSessionStorage();
     this.writerId = readOrCreateWriterId(sessionStorage, options.createWriterId ?? createBrowserWriterId);
-    this.channel = options.channelFactory?.create(CHANNEL_NAME) ?? browserChannelFactory()?.create(CHANNEL_NAME);
-    this.channel?.addMessageListener(this.receiveMessage);
+    this.channel = createChannel(options.channelFactory ?? browserChannelFactory());
+    try {
+      this.channel?.addMessageListener(this.receiveMessage);
+    } catch {
+      // Advisory tab coordination must never block recovery or cloud saves.
+    }
   }
 
   announceActive(uid: string, mapId: string): void {
+    this.activeMapKeys.add(mapKey(uid, mapId));
     this.post({ type: 'active', uid, mapId, writerId: this.writerId });
   }
 
   clearActive(uid: string, mapId: string): void {
+    this.activeMapKeys.delete(mapKey(uid, mapId));
     this.post({ type: 'clear', uid, mapId, writerId: this.writerId });
   }
 
@@ -61,6 +68,7 @@ export class DraftRecoveryCoordinator {
     listeners.add(listener);
     this.subscribersByMap.set(key, listeners);
     listener(this.liveWriterIds(key));
+    this.post({ type: 'hello', uid, mapId, writerId: this.writerId });
 
     return () => {
       listeners.delete(listener);
@@ -72,6 +80,10 @@ export class DraftRecoveryCoordinator {
     if (!isActiveWriterMessage(message) || message.writerId === this.writerId) return;
 
     const key = mapKey(message.uid, message.mapId);
+    if (message.type === 'hello') {
+      if (this.activeMapKeys.has(key)) this.post({ type: 'active', uid: message.uid, mapId: message.mapId, writerId: this.writerId });
+      return;
+    }
     const writerIds = this.liveWriterIdsByMap.get(key) ?? new Set<string>();
     if (message.type === 'active') writerIds.add(message.writerId);
     else writerIds.delete(message.writerId);
@@ -108,7 +120,7 @@ function mapKey(uid: string, mapId: string): string {
 function isActiveWriterMessage(message: unknown): message is ActiveWriterMessage {
   if (!message || typeof message !== 'object') return false;
   const candidate = message as Partial<ActiveWriterMessage>;
-  return (candidate.type === 'active' || candidate.type === 'clear')
+  return (candidate.type === 'active' || candidate.type === 'clear' || candidate.type === 'hello')
     && typeof candidate.uid === 'string'
     && typeof candidate.mapId === 'string'
     && typeof candidate.writerId === 'string';
@@ -156,6 +168,14 @@ function browserChannelFactory(): DraftRecoveryChannelFactory | undefined {
       };
     }
   };
+}
+
+function createChannel(factory: DraftRecoveryChannelFactory | undefined): DraftRecoveryChannel | undefined {
+  try {
+    return factory?.create(CHANNEL_NAME);
+  } catch {
+    return undefined;
+  }
 }
 
 function createBrowserWriterId(): string {
