@@ -15,7 +15,7 @@ describe('AppShell', () => {
   beforeEach(() => setDesktopViewport(true));
   afterEach(() => vi.unstubAllGlobals());
 
-  it('provides bounded sidebar and editor dividers in edit mode', () => {
+  it('starts Mind Map First with bounded sidebar and editor dividers in edit mode', () => {
     render(
       <AppShell
         sidebar={<p>Navigation</p>}
@@ -29,7 +29,7 @@ describe('AppShell', () => {
     );
 
     expect(screen.getByRole('separator', { name: 'Sidebar width' })).toHaveAttribute('aria-valuenow', '300');
-    expect(screen.getByRole('separator', { name: 'Editor width' })).toHaveAttribute('aria-valuenow', '39');
+    expect(screen.getByRole('separator', { name: 'Editor width' })).toHaveAttribute('aria-valuenow', '35');
     expect(screen.getByLabelText('Preview pane')).toHaveStyle({ minWidth: '320px' });
   });
 

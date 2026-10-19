@@ -125,12 +125,32 @@ test('uses real pointer drags to keep desktop workspace panels bounded and prese
   await page.goto('./');
   await signInToLocalWorkspace(page);
 
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+  const header = page.locator('.workspace-header');
+  const desktopLayout = page.locator('.desktop-pane-layout');
+  const [headerBox, desktopLayoutBox, scrollWidth] = await Promise.all([
+    header.boundingBox(),
+    desktopLayout.boundingBox(),
+    page.evaluate(() => document.documentElement.scrollWidth)
+  ]);
+  expect(headerBox).not.toBeNull();
+  expect(desktopLayoutBox).not.toBeNull();
+  expect(headerBox!.height).toBeLessThanOrEqual(60);
+  expect(desktopLayoutBox!.y + desktopLayoutBox!.height).toBeGreaterThanOrEqual(viewport!.height - 12);
+  expect(scrollWidth).toBeLessThanOrEqual(viewport!.width);
+
   const sidebar = page.getByLabel('Workspace navigation');
   const editor = page.getByLabel('Markdown editor');
   const preview = page.getByRole('img', { name: 'Markmap preview' });
   const previewPanel = page.getByLabel('Preview pane');
   const sidebarDivider = page.getByRole('separator', { name: 'Sidebar width' });
   const editorDivider = page.getByRole('separator', { name: 'Editor width' });
+  const initialGeometry = await readEditorGeometry(editor, previewPanel);
+  const initialEditorPercent = initialGeometry.editor.width / initialGeometry.splitWidth * 100;
+  expect(initialEditorPercent).toBeCloseTo(35, 0);
+  expect(initialGeometry.preview.width).toBeGreaterThan(initialGeometry.editor.width);
+  await expect(editorDivider).toHaveAttribute('aria-valuenow', '35');
   const sidebarBefore = await sidebar.boundingBox();
   const sidebarDividerBox = await sidebarDivider.boundingBox();
   expect(sidebarBefore).not.toBeNull();
@@ -196,6 +216,10 @@ test('uses real pointer drags to keep desktop workspace panels bounded and prese
   await expect(page.getByLabel('Workspace navigation')).toBeHidden();
   await expect(page.getByLabel('Markdown editor')).toBeHidden();
   await expect(page.getByRole('separator')).toHaveCount(0);
+  const focusedPreviewPanel = await previewPanel.boundingBox();
+  expect(focusedPreviewPanel).not.toBeNull();
+  expect(focusedPreviewPanel!.width).toBeGreaterThan(initialGeometry.preview.width);
+  expect(focusedPreviewPanel!.x).toBeLessThanOrEqual(initialGeometry.preview.x);
   for (const name of ['Zoom in', 'Zoom out', 'Fit preview', 'Reset preview']) {
     await expect(page.getByRole('button', { name })).toBeVisible();
   }
