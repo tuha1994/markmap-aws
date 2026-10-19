@@ -48,4 +48,21 @@ describe('MarkmapPreview', () => {
     expect(destroy).toHaveBeenCalledOnce();
     vi.useRealTimers();
   });
+
+  it('does not mutate the Markmap camera when focus or viewport layout changes', async () => {
+    vi.useFakeTimers();
+    const adapter = { render: vi.fn().mockResolvedValue({ markdown: '# map' }), destroy: vi.fn(), fit: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn(), reset: vi.fn() };
+    const view = render(<MarkmapPreview markdown="# map" createAdapter={() => adapter} />);
+
+    await act(async () => { vi.advanceTimersByTime(300); });
+    adapter.render.mockClear();
+    view.rerender(<MarkmapPreview markdown="# map" createAdapter={() => adapter} isFocusMode />);
+    act(() => window.dispatchEvent(new Event('resize')));
+    view.rerender(<MarkmapPreview markdown="# map" createAdapter={() => adapter} isFocusMode={false} />);
+
+    expect(adapter.fit).not.toHaveBeenCalled();
+    expect(adapter.reset).not.toHaveBeenCalled();
+    expect(adapter.render).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
 });

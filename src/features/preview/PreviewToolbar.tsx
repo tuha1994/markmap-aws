@@ -7,13 +7,15 @@ type Props = {
 };
 
 export function PreviewToolbar({ adapter, isFocusMode = false, onToggleFocus }: Props) {
+  const focusLabel = isFocusMode ? 'Exit focus mode' : 'Enter focus mode';
+
   return (
     <div className="preview-toolbar" role="toolbar" aria-label="Preview controls">
-      <button type="button" title="Fit preview" onClick={() => adapter?.fit()} disabled={!adapter}>Fit preview</button>
-      <button type="button" title="Zoom in" onClick={() => adapter?.zoomIn()} disabled={!adapter}>Zoom in</button>
-      <button type="button" title="Zoom out" onClick={() => adapter?.zoomOut()} disabled={!adapter}>Zoom out</button>
-      <button type="button" title="Reset preview" onClick={() => adapter?.reset()} disabled={!adapter}>Reset preview</button>
-      {onToggleFocus ? <button type="button" className="preview-focus-button" onClick={onToggleFocus}>{isFocusMode ? 'Exit focus mode' : 'Enter focus mode'}</button> : null}
+      <button type="button" aria-label="Fit preview" title="Fit preview" onClick={() => adapter?.fit()} disabled={!adapter}><span aria-hidden="true">⤢</span></button>
+      <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => adapter?.zoomIn()} disabled={!adapter}><span aria-hidden="true">＋</span></button>
+      <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => adapter?.zoomOut()} disabled={!adapter}><span aria-hidden="true">−</span></button>
+      <button type="button" aria-label="Reset preview" title="Reset preview" onClick={() => adapter?.reset()} disabled={!adapter}><span aria-hidden="true">↺</span></button>
+      {onToggleFocus ? <button type="button" className="preview-focus-button" aria-label={focusLabel} title={focusLabel} onClick={onToggleFocus}><span aria-hidden="true">⛶</span></button> : null}
     </div>
   );
 }

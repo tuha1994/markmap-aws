@@ -28,6 +28,43 @@ type EditorGeometry = {
   splitWidth: number;
 };
 
+type PreviewGeometry = {
+  panel: { clientWidth: number; clientHeight: number; scrollWidth: number; scrollHeight: number };
+  section: { width: number; bottom: number };
+  controls: { bottom: number };
+  canvas: { y: number; width: number; height: number; bottom: number };
+};
+
+async function readPreviewGeometry(page: Page): Promise<PreviewGeometry> {
+  return page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>('[aria-label="Preview pane"]');
+    const section = document.querySelector<HTMLElement>('.markmap-preview');
+    const controls = document.querySelector<HTMLElement>('.markmap-preview-heading');
+    const canvas = document.querySelector<SVGSVGElement>('.markmap-preview svg');
+    if (!panel || !section || !controls || !canvas) throw new Error('Preview geometry is unavailable.');
+    const sectionRect = section.getBoundingClientRect();
+    const controlsRect = controls.getBoundingClientRect();
+    const canvasRect = canvas.getBoundingClientRect();
+    return {
+      panel: { clientWidth: panel.clientWidth, clientHeight: panel.clientHeight, scrollWidth: panel.scrollWidth, scrollHeight: panel.scrollHeight },
+      section: { width: sectionRect.width, bottom: sectionRect.bottom },
+      controls: { bottom: controlsRect.bottom },
+      canvas: { y: canvasRect.y, width: canvasRect.width, height: canvasRect.height, bottom: canvasRect.bottom }
+    };
+  });
+}
+
+function expectPreviewCanvasFillsContent(geometry: PreviewGeometry) {
+  const tolerance = 2;
+  expect(geometry.canvas.width).toBeGreaterThan(0);
+  expect(geometry.canvas.height).toBeGreaterThan(0);
+  expect(geometry.canvas.y).toBeGreaterThanOrEqual(geometry.controls.bottom);
+  expect(Math.abs(geometry.canvas.width - geometry.section.width)).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(geometry.canvas.bottom - geometry.section.bottom)).toBeLessThanOrEqual(tolerance);
+  expect(geometry.panel.scrollWidth).toBeLessThanOrEqual(geometry.panel.clientWidth + tolerance);
+  expect(geometry.panel.scrollHeight).toBeLessThanOrEqual(geometry.panel.clientHeight + tolerance);
+}
+
 async function readEditorGeometry(editor: ReturnType<Page['getByLabel']>, previewPanel: ReturnType<Page['getByLabel']>): Promise<EditorGeometry> {
   const [editorBox, previewBox, splitWidth] = await Promise.all([
     editor.boundingBox(),
@@ -247,6 +284,32 @@ test('uses real pointer drags to keep desktop workspace panels bounded and prese
   await expect(page.getByRole('separator')).toHaveCount(2);
   await expect(markdown).toHaveValue(draft);
   await expect(preview).toContainText('Focus-preserved E2E draft');
+});
+
+test('fills the live Explore content area below compact desktop controls after divider drag and in Focus mode', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('./');
+  await signInToLocalWorkspace(page);
+
+  const previewPanel = page.getByLabel('Preview pane');
+  const previewToolbar = page.getByRole('toolbar', { name: 'Preview controls' });
+  for (const name of ['Fit preview', 'Zoom in', 'Zoom out', 'Reset preview', 'Enter focus mode']) {
+    const control = previewToolbar.getByRole('button', { name });
+    await expect(control).toHaveAttribute('aria-label', name);
+    await expect(control).toHaveAttribute('title', name);
+    const box = await control.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeLessThan(40);
+  }
+
+  const editorDivider = page.getByRole('separator', { name: 'Editor width' });
+  await dragDividerToExtreme(page, editorDivider, -1000);
+  await expect(page.getByRole('img', { name: 'Markmap preview' }).locator('.markmap-node')).toHaveCount(1);
+  expectPreviewCanvasFillsContent(await readPreviewGeometry(page));
+
+  await previewToolbar.getByRole('button', { name: 'Enter focus mode' }).click();
+  await expect(previewPanel).toBeVisible();
+  expectPreviewCanvasFillsContent(await readPreviewGeometry(page));
 });
 
 test('persists a desktop theme preference as UI-only local state', async ({ page }) => {
