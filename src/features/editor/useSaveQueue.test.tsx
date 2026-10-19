@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { makeMindMap } from '../../test/factories';
 import type { DraftRecoveryRecord, DraftRecoveryStore } from './draftRecoveryStore';
-import { useSaveQueue, type SaveQueue, type SaveRepository } from './useSaveQueue';
+import { useSaveQueue, type SaveQueue, type SaveQueueTiming, type SaveRepository } from './useSaveQueue';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -15,6 +15,7 @@ function deferred<T>() {
 
 type QueueOptions = {
   recoveryStore?: DraftRecoveryStore;
+  timing?: SaveQueueTiming;
   recoveryCoordinator?: {
     writerId: string;
     announceActive(uid: string, mapId: string): void;
@@ -22,6 +23,34 @@ type QueueOptions = {
     subscribeToLiveWriters(uid: string, mapId: string, listener: (writerIds: string[]) => void): () => void;
   };
 };
+
+function controlledTiming(initialNow = 0) {
+  let now = initialNow;
+  let nextHandle = 1;
+  const timers = new Map<number, { callback: () => void; dueAt: number }>();
+  const timing: SaveQueueTiming = {
+    now: () => now,
+    setTimeout: (callback, delay) => {
+      const handle = nextHandle;
+      nextHandle += 1;
+      timers.set(handle, { callback, dueAt: now + delay });
+      return handle as unknown as ReturnType<typeof setTimeout>;
+    },
+    clearTimeout: (handle) => { timers.delete(handle as unknown as number); }
+  };
+  const advanceBy = async (milliseconds: number) => {
+    now += milliseconds;
+    while (true) {
+      const next = [...timers.entries()]
+        .filter(([, timer]) => timer.dueAt <= now)
+        .sort(([, left], [, right]) => left.dueAt - right.dueAt)[0];
+      if (!next) return;
+      timers.delete(next[0]);
+      await act(async () => { next[1].callback(); await Promise.resolve(); });
+    }
+  };
+  return { timing, advanceBy };
+}
 
 type QueueWithFlush = SaveQueue & { flush(): Promise<'saved' | 'error' | 'conflict'> };
 const useQueue = useSaveQueue as unknown as (map: ReturnType<typeof makeMindMap> & { id: string }, repository: SaveRepository, options?: QueueOptions) => QueueWithFlush;
@@ -143,6 +172,34 @@ describe('useSaveQueue', () => {
       markdown: 'second draft', expectedContentVersion: 2
     }));
     vi.useRealTimers();
+  });
+
+  it('coalesces a newer draft after a prune-pending revision commit and retains cleanup retry state', async () => {
+    const { timing } = controlledTiming(0);
+    const firstRevision = deferred<{ status: 'prune-pending' }>();
+    const update = vi.fn().mockResolvedValue({ status: 'updated', contentVersion: 3 });
+    const saveRevision = vi.fn().mockReturnValue(firstRevision.promise);
+    const retryRevisionPrune = vi.fn().mockResolvedValue(false);
+    render(<SaveQueueHarness repository={{ update, saveRevision, retryRevisionPrune }} options={{ timing }} map={{ id: 'map-1', ...makeMindMap({ currentRevisionAt: new Date(-300_000) as never }) }} />);
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'First' }).click();
+      screen.getByRole('button', { name: 'Flush' }).click();
+      await Promise.resolve();
+    });
+    expect(saveRevision).toHaveBeenCalledWith(expect.objectContaining({ markdown: 'first draft', reason: 'autosave' }));
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Second' }).click();
+      firstRevision.resolve({ status: 'prune-pending' });
+      await Promise.resolve();
+    });
+
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ markdown: 'second draft', expectedContentVersion: 2 }));
+    expect(screen.getByTestId('status')).toHaveTextContent('prunePending');
+    await act(async () => { screen.getByRole('button', { name: 'Retry' }).click(); await Promise.resolve(); });
+    expect(retryRevisionPrune).toHaveBeenCalledWith('map-1');
+    expect(screen.getByTestId('status')).toHaveTextContent('saved');
   });
 
   it('starts autosave after 5 seconds idle', async () => {
@@ -327,6 +384,25 @@ describe('useSaveQueue', () => {
     vi.useRealTimers();
   });
 
+  it('uses injected timing for the 5-second trailing debounce and 30-second hard deadline', async () => {
+    const { timing, advanceBy } = controlledTiming();
+    const update = vi.fn().mockResolvedValue({ status: 'updated', contentVersion: 2 });
+    render(<SaveQueueHarness repository={{ update }} options={{ timing }} />);
+
+    screen.getByRole('button', { name: 'First' }).click();
+    await advanceBy(4_999);
+    expect(update).not.toHaveBeenCalled();
+    await advanceBy(1);
+    expect(update).toHaveBeenCalledTimes(1);
+
+    for (let second = 0; second < 30; second += 1) {
+      screen.getByRole('button', { name: second % 2 === 0 ? 'First' : 'Second' }).click();
+      await advanceBy(1_000);
+    }
+    expect(update).toHaveBeenCalledTimes(2);
+    expect(update).toHaveBeenLastCalledWith(expect.objectContaining({ markdown: 'second draft' }));
+  });
+
   it('flushes continuous typing once at the 30-second max-wait deadline without waiting idle', async () => {
     vi.useFakeTimers();
     const update = vi.fn().mockResolvedValue({ status: 'updated', contentVersion: 2 });
@@ -365,6 +441,24 @@ describe('useSaveQueue', () => {
     vi.useRealTimers();
   });
 
+  it('uses injected autosnapshot time at the exact five-minute boundary after a prune-pending commit', async () => {
+    const { timing, advanceBy } = controlledTiming();
+    const update = vi.fn().mockResolvedValue({ status: 'updated', contentVersion: 3 });
+    const saveRevision = vi.fn().mockResolvedValue({ status: 'prune-pending' });
+    render(<SaveQueueHarness repository={{ update, saveRevision }} options={{ timing }} map={{ id: 'map-1', ...makeMindMap({ currentRevisionAt: new Date(-300_000) as never }) }} />);
+
+    await act(async () => { screen.getByRole('button', { name: 'First' }).click(); screen.getByRole('button', { name: 'Flush' }).click(); await Promise.resolve(); });
+    expect(saveRevision).toHaveBeenCalledTimes(1);
+
+    await act(async () => { screen.getByRole('button', { name: 'Second' }).click(); screen.getByRole('button', { name: 'Flush' }).click(); await Promise.resolve(); });
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(saveRevision).toHaveBeenCalledTimes(1);
+
+    await advanceBy(300_000);
+    await act(async () => { screen.getByRole('button', { name: 'First' }).click(); screen.getByRole('button', { name: 'Flush' }).click(); await Promise.resolve(); });
+    expect(saveRevision).toHaveBeenCalledTimes(2);
+  });
+
   it('hydrates one compatible recovery record for the current writer', async () => {
     const { options, coordinator } = recoveryOptions([recoveryRecord()]);
     render(<SaveQueueHarness repository={{ update: vi.fn() }} options={options} />);
@@ -372,6 +466,25 @@ describe('useSaveQueue', () => {
     expect(screen.getByTestId('draft')).toHaveTextContent('# recovered');
     expect(screen.getByTestId('status')).toHaveTextContent('unsaved');
     expect(coordinator.announceActive).toHaveBeenCalledWith('owner-uid', 'map-1');
+  });
+
+  it('opens a recovery conflict if another live writer appears after compatible hydration', async () => {
+    let notifyLiveWriters: ((writerIds: string[]) => void) | undefined;
+    const { options, store } = recoveryOptions([recoveryRecord()]);
+    options.recoveryCoordinator!.subscribeToLiveWriters = vi.fn((_uid, _mapId, listener) => {
+      notifyLiveWriters = listener;
+      listener([]);
+      return () => undefined;
+    });
+    render(<SaveQueueHarness repository={{ update: vi.fn() }} options={options} />);
+
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByTestId('status')).toHaveTextContent('unsaved');
+
+    await act(async () => { notifyLiveWriters!(['writer-2']); });
+    expect(screen.getByTestId('status')).toHaveTextContent('conflict');
+    expect(screen.getByTestId('conflict')).toHaveTextContent('# recovered|# Cloud foundations');
+    expect(store.deleteIfCurrent).not.toHaveBeenCalled();
   });
 
   it('opens a conflict instead of overwriting remote content for a stale recovery base version', async () => {
