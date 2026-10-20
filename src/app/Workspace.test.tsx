@@ -295,6 +295,44 @@ describe('PrivateWorkspace', () => {
     expect(screen.queryByRole('dialog', { name: 'Discard unsaved changes?' })).not.toBeInTheDocument();
   });
 
+  it('does not retry an in-flight failed navigation flush until Retry is explicitly selected', async () => {
+    vi.useFakeTimers();
+    let resolveFirstSave!: (result: { status: 'error'; error: Error }) => void;
+    const firstSave = new Promise<{ status: 'error'; error: Error }>((resolve) => { resolveFirstSave = resolve; });
+    mockedUpdateMindMapVersioned
+      .mockReturnValueOnce(firstSave as never)
+      .mockResolvedValueOnce({ status: 'updated', contentVersion: 2 });
+    mapList.current = {
+      maps: [
+        { ...makeMindMap({ title: 'Architecture', markdown: '# Architecture', currentRevisionAt: new Date() as never }), id: 'map-1' },
+        { ...makeMindMap({ title: 'Product roadmap', markdown: '# Product roadmap', currentRevisionAt: new Date() as never }), id: 'map-2' }
+      ],
+      loading: false,
+      error: null
+    };
+    render(<PrivateWorkspace />);
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Markdown' }), { target: { value: '# Active draft' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(mockedUpdateMindMapVersioned).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Workspace navigation' })).getByRole('button', { name: 'Product roadmap' }));
+
+    await act(async () => { resolveFirstSave({ status: 'error', error: new Error('temporary failure') }); await Promise.resolve(); });
+    expect(mockedUpdateMindMapVersioned).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('heading', { name: 'Architecture' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Error');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByRole('heading', { name: 'Product roadmap' })).toBeInTheDocument();
+    expect(mockedUpdateMindMapVersioned).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
   it('hands off to the retained navigation target after a failed flush is retried successfully', async () => {
     mockedUpdateMindMapVersioned
       .mockResolvedValueOnce({ status: 'error', error: new Error('offline') })

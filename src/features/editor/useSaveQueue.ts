@@ -122,7 +122,7 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository, opt
       return Promise.resolve('error');
     }
     if (inFlight.current) {
-      return (inFlightSave.current ?? Promise.resolve('error')).then(() => saveRef.current!(requestedMapSession, mode));
+      return inFlightSave.current ?? Promise.resolve('error');
     }
     if (draftRef.current === confirmedMarkdown.current && mode === 'normal') {
       setStatus('saved');
@@ -270,6 +270,11 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository, opt
     setConflict(null);
     if (choice === 'useRemote') {
       clearTimer();
+      const record = recoveryRecord.current;
+      if (record && record.uid === mapRef.current.ownerUid && record.mapId === mapRef.current.id && record.writerId === recoveryCoordinator.current.writerId) {
+        void recoveryStore.current.deleteIfCurrent(record);
+        recoveryRecord.current = null;
+      }
       draftRef.current = currentConflict.remoteMarkdown;
       confirmedMarkdown.current = currentConflict.remoteMarkdown;
       confirmedVersion.current = currentConflict.remoteContentVersion;
@@ -278,7 +283,22 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository, opt
       setStatus('saved');
       return;
     }
+    draftRef.current = currentConflict.localMarkdown;
     confirmedVersion.current = currentConflict.remoteContentVersion;
+    generation.current += 1;
+    const record: DraftRecoveryRecord = {
+      uid: mapRef.current.ownerUid,
+      mapId: mapRef.current.id,
+      writerId: recoveryCoordinator.current.writerId,
+      baseContentVersion: currentConflict.remoteContentVersion,
+      markdown: currentConflict.localMarkdown,
+      generation: generation.current,
+      recordVersion: 0,
+      updatedAtMs: timing.current.now()
+    };
+    recoveryRecord.current = record;
+    void recoveryStore.current.put(record);
+    setDraftState(currentConflict.localMarkdown);
     setStatus('unsaved');
     save();
   }, [clearTimer, save]);
@@ -331,6 +351,8 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository, opt
     const coordinator = recoveryCoordinator.current;
     const recoveryMap = mapRef.current;
     const recoverySession = mapSession.current;
+    const recoveryReadDraft = draftRef.current;
+    const recoveryReadGeneration = generation.current;
     let active = true;
 
     const openRecoveryConflict = (record: DraftRecoveryRecord) => {
@@ -357,14 +379,17 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository, opt
     coordinator.announceActive(recoveryMap.ownerUid, recoveryMap.id);
     void store.list(recoveryMap.ownerUid, recoveryMap.id).then((records) => {
       if (!active || recoverySession !== mapSession.current) return;
+      if (draftRef.current !== recoveryReadDraft || generation.current !== recoveryReadGeneration || recoveryRecord.current !== null) return;
       const ownRecords = records.filter((record) => record.writerId === coordinator.writerId);
       const ownRecord = ownRecords.length === 1 ? ownRecords[0] : undefined;
       if (!ownRecord) return;
+      generation.current = Math.max(generation.current, ownRecord.generation);
       if (ownRecord.markdown === recoveryMap.markdown) {
         void store.deleteIfCurrent(ownRecord);
         return;
       }
       if (liveSecondWriter || records.length !== 1 || ownRecord.baseContentVersion !== recoveryMap.contentVersion) {
+        recoveryRecord.current = ownRecord;
         openRecoveryConflict(ownRecord);
         return;
       }

@@ -73,6 +73,7 @@ function SaveQueueHarness({ repository, map = { id: 'map-1', ...makeMindMap() },
       <button onClick={() => queue.retry()}>Retry</button>
       <button onClick={() => queue.saveVersion()}>Save version</button>
       <button onClick={() => queue.resolveConflict('keepMine')}>Keep mine</button>
+      <button onClick={() => queue.resolveConflict('useRemote')}>Use competing</button>
       <button onClick={() => void queue.flush().then((outcome) => { document.querySelector('[data-testid="flush"]')!.textContent = outcome; })}>Flush</button>
     </>
   );
@@ -469,6 +470,24 @@ describe('useSaveQueue', () => {
     expect(coordinator.announceActive).toHaveBeenCalledWith('owner-uid', 'map-1');
   });
 
+  it('does not hydrate a delayed compatible recovery record over a newer typed draft', async () => {
+    const { timing, advanceBy } = controlledTiming();
+    const delayedRecords = deferred<DraftRecoveryRecord[]>();
+    const { options, store } = recoveryOptions();
+    store.list = vi.fn().mockReturnValue(delayedRecords.promise);
+    const update = vi.fn().mockResolvedValue({ status: 'updated', contentVersion: 2 });
+    render(<SaveQueueHarness repository={{ update }} options={{ ...options, timing }} />);
+
+    await act(async () => { screen.getByRole('button', { name: 'First' }).click(); });
+    await act(async () => { delayedRecords.resolve([recoveryRecord({ generation: 42, markdown: '# stale recovered' })]); await Promise.resolve(); });
+
+    expect(screen.getByTestId('draft')).toHaveTextContent('first draft');
+    expect(screen.getByTestId('status')).toHaveTextContent('unsaved');
+    await advanceBy(5000);
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ markdown: 'first draft' }));
+    expect(update).not.toHaveBeenCalledWith(expect.objectContaining({ markdown: '# stale recovered' }));
+  });
+
   it('opens a recovery conflict if another live writer appears after compatible hydration', async () => {
     let notifyLiveWriters: ((writerIds: string[]) => void) | undefined;
     const { options, store } = recoveryOptions([recoveryRecord()]);
@@ -534,6 +553,41 @@ describe('useSaveQueue', () => {
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByTestId('status')).toHaveTextContent('conflict');
     expect(screen.getByTestId('draft')).toHaveTextContent('# Cloud foundations');
+  });
+
+  it('retires only this writer recovery record when competing recovery is chosen', async () => {
+    const ownRecord = recoveryRecord({ markdown: '# local recovery' });
+    const otherRecord = recoveryRecord({ writerId: 'writer-2', markdown: '# competing recovery' });
+    const { options, store } = recoveryOptions([ownRecord, otherRecord]);
+    render(<SaveQueueHarness repository={{ update: vi.fn() }} options={options} />);
+
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByTestId('status')).toHaveTextContent('conflict');
+    await act(async () => { screen.getByRole('button', { name: 'Use competing' }).click(); });
+
+    expect(store.deleteIfCurrent).toHaveBeenCalledTimes(1);
+    expect(store.deleteIfCurrent).toHaveBeenCalledWith(ownRecord);
+    expect(store.deleteIfCurrent).not.toHaveBeenCalledWith(otherRecord);
+    expect(screen.getByTestId('draft')).toHaveTextContent('# Cloud foundations');
+    expect(screen.getByTestId('status')).toHaveTextContent('saved');
+  });
+
+  it('replaces a stale-base recovery record with the current generation when keeping mine', async () => {
+    const staleRecord = recoveryRecord({ generation: 7, baseContentVersion: 2, markdown: '# local recovery' });
+    const pendingUpdate = deferred<{ status: 'updated'; contentVersion: number }>();
+    const { options, store } = recoveryOptions([staleRecord]);
+    const update = vi.fn().mockReturnValue(pendingUpdate.promise);
+    render(<SaveQueueHarness repository={{ update }} options={options} />);
+
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByTestId('status')).toHaveTextContent('conflict');
+    await act(async () => { screen.getByRole('button', { name: 'Keep mine' }).click(); await Promise.resolve(); });
+
+    expect(store.put).toHaveBeenCalledWith(expect.objectContaining({
+      writerId: 'writer-1', baseContentVersion: 1, markdown: '# local recovery', generation: 8
+    }));
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ markdown: '# local recovery', expectedContentVersion: 1 }));
+    expect(store.deleteIfCurrent).not.toHaveBeenCalled();
   });
 
   it('deletes only this writer matching recovery record after confirming the latest generation', async () => {
