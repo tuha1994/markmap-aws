@@ -11,6 +11,14 @@ import {
 
 type StoredEntry = DraftRecoveryRecord | (DraftRecoveryIdentity & { deleted: true });
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 class InMemoryRecoveryAdapter implements RecoveryStorageAdapter {
   private readonly records = new Map<string, StoredEntry>();
 
@@ -21,6 +29,36 @@ class InMemoryRecoveryAdapter implements RecoveryStorageAdapter {
         .filter((entry): entry is DraftRecoveryRecord => !('deleted' in entry) && entry.uid === uid && entry.mapId === mapId),
       put: async (record) => {
         this.records.set(keyFor(record), record);
+      },
+      delete: async (identity) => {
+        this.records.set(keyFor(identity), { ...identity, deleted: true });
+      }
+    });
+  }
+}
+
+class AllocatedButUnresolvedPutAdapter implements RecoveryStorageAdapter {
+  private readonly records = new Map<string, StoredEntry>();
+  private readonly allocated = deferred<void>();
+  private readonly release = deferred<void>();
+
+  async waitForAllocatedRecord(): Promise<void> {
+    return this.allocated.promise;
+  }
+
+  releasePut(): void {
+    this.release.resolve();
+  }
+
+  async runTransaction<T>(operation: (transaction: RecoveryStorageTransaction) => Promise<T>): Promise<T> {
+    return operation({
+      get: async (identity) => this.records.get(keyFor(identity)),
+      list: async (uid, mapId) => [...this.records.values()]
+        .filter((entry): entry is DraftRecoveryRecord => !('deleted' in entry) && entry.uid === uid && entry.mapId === mapId),
+      put: async (record) => {
+        this.records.set(keyFor(record), { ...record });
+        this.allocated.resolve();
+        await this.release.promise;
       },
       delete: async (identity) => {
         this.records.set(keyFor(identity), { ...identity, deleted: true });
@@ -127,13 +165,32 @@ describe('DraftRecoveryStore', () => {
     await expect(store.list('user-a', 'map-1')).resolves.toEqual([]);
   });
 
-  it('retires an unresolved current put before its delayed write can arrive', async () => {
-    const store = createDraftRecoveryStore(new InMemoryRecoveryAdapter());
+  it('retires an allocated but unresolved put despite the caller still holding record version zero', async () => {
+    const adapter = new AllocatedButUnresolvedPutAdapter();
+    const store = createDraftRecoveryStore(adapter);
     const unresolved = record({ generation: 1, recordVersion: 0, markdown: '# Confirmed before put' });
+    const put = store.put(unresolved);
+
+    await adapter.waitForAllocatedRecord();
+    expect(unresolved.recordVersion).toBe(0);
 
     await expect(store.retireConfirmed(unresolved)).resolves.toBe(true);
-    await expect(store.put(unresolved)).resolves.toBe(false);
     await expect(store.list('user-a', 'map-1')).resolves.toEqual([]);
+
+    adapter.releasePut();
+    await expect(put).resolves.toBe(true);
+    await expect(store.list('user-a', 'map-1')).resolves.toEqual([]);
+  });
+
+  it('does not retire a newer generation for the same writer', async () => {
+    const store = createDraftRecoveryStore(new InMemoryRecoveryAdapter());
+    const confirmed = record({ generation: 1, recordVersion: 0, markdown: '# Confirmed' });
+    const newer = record({ generation: 2, recordVersion: 7, markdown: '# Newer' });
+
+    await store.put(newer);
+
+    await expect(store.retireConfirmed(confirmed)).resolves.toBe(false);
+    await expect(store.list('user-a', 'map-1')).resolves.toEqual([newer]);
   });
 
   it('resolves safely and retries after blocked and rejected IndexedDB opens', async () => {

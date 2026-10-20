@@ -79,14 +79,10 @@ export function createDraftRecoveryStore(adapter: RecoveryStorageAdapter): Draft
     async retireConfirmed(record) {
       return adapter.runTransaction(async (transaction) => {
         const current = await transaction.get(record);
-        if (!current) {
-          await transaction.delete(record);
-          return true;
-        }
-        if (isTombstone(current)) {
-          return current.generation === record.generation && current.recordVersion === record.recordVersion;
-        }
-        if (current.generation !== record.generation || current.recordVersion !== record.recordVersion) return false;
+        // Firestore confirmation is authoritative for this writer generation:
+        // retire an allocated record even when the caller has not received its
+        // transaction-assigned recordVersion yet, but never touch a newer draft.
+        if (current && current.generation > record.generation) return false;
 
         await transaction.delete(record);
         return true;

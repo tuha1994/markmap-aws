@@ -2,7 +2,7 @@ import { act, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { makeMindMap } from '../../test/factories';
-import type { DraftRecoveryRecord, DraftRecoveryStore } from './draftRecoveryStore';
+import { createDraftRecoveryStore, type DraftRecoveryRecord, type DraftRecoveryStore, type RecoveryStorageAdapter, type RecoveryStorageTransaction } from './draftRecoveryStore';
 import { useSaveQueue, type SaveQueue, type SaveQueueTiming, type SaveRepository } from './useSaveQueue';
 
 function deferred<T>() {
@@ -11,6 +11,36 @@ function deferred<T>() {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+class AllocatedButUnresolvedRecoveryAdapter implements RecoveryStorageAdapter {
+  private readonly entries = new Map<string, DraftRecoveryRecord | { uid: string; mapId: string; writerId: string; generation: number; recordVersion: number; deleted: true }>();
+  private readonly allocated = deferred<void>();
+  private readonly release = deferred<void>();
+
+  async waitForAllocatedRecord(): Promise<void> {
+    return this.allocated.promise;
+  }
+
+  releasePut(): void {
+    this.release.resolve();
+  }
+
+  async runTransaction<T>(operation: (transaction: RecoveryStorageTransaction) => Promise<T>): Promise<T> {
+    return operation({
+      get: async (identity) => this.entries.get(`${identity.uid}\u0000${identity.mapId}\u0000${identity.writerId}`),
+      list: async (uid, mapId) => [...this.entries.values()]
+        .filter((entry): entry is DraftRecoveryRecord => !('deleted' in entry) && entry.uid === uid && entry.mapId === mapId),
+      put: async (record) => {
+        this.entries.set(`${record.uid}\u0000${record.mapId}\u0000${record.writerId}`, { ...record });
+        this.allocated.resolve();
+        await this.release.promise;
+      },
+      delete: async (identity) => {
+        this.entries.set(`${identity.uid}\u0000${identity.mapId}\u0000${identity.writerId}`, { ...identity, deleted: true });
+      }
+    });
+  }
 }
 
 type QueueOptions = {
@@ -601,46 +631,31 @@ describe('useSaveQueue', () => {
     vi.useRealTimers();
   });
 
-  it('retires a deferred recovery put after an immediate confirmed flush so it cannot recreate a draft', async () => {
-    const delayedPut = deferred<void>();
-    const persisted = new Map<string, DraftRecoveryRecord>();
-    let retiredGeneration = -1;
-    const store = {
-      list: vi.fn().mockResolvedValue([]),
-      put: vi.fn(async (record: DraftRecoveryRecord) => {
-        await delayedPut.promise;
-        if (record.generation <= retiredGeneration) return false;
-        persisted.set(record.writerId, { ...record });
-        return true;
-      }),
-      deleteIfCurrent: vi.fn().mockResolvedValue(false),
-      retireConfirmed: vi.fn(async (record: DraftRecoveryRecord) => {
-        retiredGeneration = Math.max(retiredGeneration, record.generation);
-        persisted.delete(record.writerId);
-        return true;
-      })
-    };
+  it('retires an allocated but unresolved recovery put after an immediate confirmed flush', async () => {
+    const adapter = new AllocatedButUnresolvedRecoveryAdapter();
+    const store = createDraftRecoveryStore(adapter);
     const coordinator = {
       writerId: 'writer-1', announceActive: vi.fn(), clearActive: vi.fn(),
       subscribeToLiveWriters: vi.fn((_uid: string, _mapId: string, listener: (writerIds: string[]) => void) => { listener([]); return () => undefined; })
     };
     const update = vi.fn().mockResolvedValue({ status: 'updated', contentVersion: 2 });
-    render(<SaveQueueHarness repository={{ update }} options={{ recoveryStore: store as DraftRecoveryStore, recoveryCoordinator: coordinator }} />);
+    render(<SaveQueueHarness repository={{ update }} options={{ recoveryStore: store, recoveryCoordinator: coordinator }} />);
 
     await act(async () => {
       screen.getByRole('button', { name: 'First' }).click();
+      await adapter.waitForAllocatedRecord();
       screen.getByRole('button', { name: 'Flush' }).click();
       await Promise.resolve();
       await Promise.resolve();
     });
     expect(screen.getByTestId('flush')).toHaveTextContent('saved');
-    expect(store.retireConfirmed).toHaveBeenCalledWith(expect.objectContaining({ generation: 1, markdown: 'first draft' }));
+    await expect(store.list('owner-uid', 'map-1')).resolves.toEqual([]);
 
     await act(async () => {
-      delayedPut.resolve();
+      adapter.releasePut();
       await Promise.resolve();
     });
-    expect(persisted.size).toBe(0);
+    await expect(store.list('owner-uid', 'map-1')).resolves.toEqual([]);
   });
 
   it('flush returns saved when clean, error after a failed immediate save, and conflict after a version conflict', async () => {
