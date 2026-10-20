@@ -87,7 +87,8 @@ function recoveryOptions(records: DraftRecoveryRecord[] = []) {
   const store: DraftRecoveryStore = {
     list: vi.fn().mockResolvedValue(records),
     put: vi.fn().mockImplementation(async (record: DraftRecoveryRecord) => { if (record.recordVersion === 0) record.recordVersion = record.generation; return true; }),
-    deleteIfCurrent: vi.fn().mockResolvedValue(true)
+    deleteIfCurrent: vi.fn().mockResolvedValue(true),
+    retireConfirmed: vi.fn().mockResolvedValue(true)
   };
   const coordinator = {
     writerId: 'writer-1', announceActive: vi.fn(), clearActive: vi.fn(),
@@ -590,14 +591,56 @@ describe('useSaveQueue', () => {
     expect(store.deleteIfCurrent).not.toHaveBeenCalled();
   });
 
-  it('deletes only this writer matching recovery record after confirming the latest generation', async () => {
+  it('retires only this writer matching recovery record after confirming the latest generation', async () => {
     vi.useFakeTimers();
     const { options, store } = recoveryOptions();
     const update = vi.fn().mockResolvedValue({ status: 'updated', contentVersion: 2 });
     render(<SaveQueueHarness repository={{ update }} options={options} />);
     await act(async () => { screen.getByRole('button', { name: 'First' }).click(); await vi.advanceTimersByTimeAsync(5000); await Promise.resolve(); });
-    expect(store.deleteIfCurrent).toHaveBeenCalledWith(expect.objectContaining({ uid: 'owner-uid', mapId: 'map-1', writerId: 'writer-1', generation: 1, recordVersion: 1 }));
+    expect(store.retireConfirmed).toHaveBeenCalledWith(expect.objectContaining({ uid: 'owner-uid', mapId: 'map-1', writerId: 'writer-1', generation: 1, recordVersion: 1 }));
     vi.useRealTimers();
+  });
+
+  it('retires a deferred recovery put after an immediate confirmed flush so it cannot recreate a draft', async () => {
+    const delayedPut = deferred<void>();
+    const persisted = new Map<string, DraftRecoveryRecord>();
+    let retiredGeneration = -1;
+    const store = {
+      list: vi.fn().mockResolvedValue([]),
+      put: vi.fn(async (record: DraftRecoveryRecord) => {
+        await delayedPut.promise;
+        if (record.generation <= retiredGeneration) return false;
+        persisted.set(record.writerId, { ...record });
+        return true;
+      }),
+      deleteIfCurrent: vi.fn().mockResolvedValue(false),
+      retireConfirmed: vi.fn(async (record: DraftRecoveryRecord) => {
+        retiredGeneration = Math.max(retiredGeneration, record.generation);
+        persisted.delete(record.writerId);
+        return true;
+      })
+    };
+    const coordinator = {
+      writerId: 'writer-1', announceActive: vi.fn(), clearActive: vi.fn(),
+      subscribeToLiveWriters: vi.fn((_uid: string, _mapId: string, listener: (writerIds: string[]) => void) => { listener([]); return () => undefined; })
+    };
+    const update = vi.fn().mockResolvedValue({ status: 'updated', contentVersion: 2 });
+    render(<SaveQueueHarness repository={{ update }} options={{ recoveryStore: store as DraftRecoveryStore, recoveryCoordinator: coordinator }} />);
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'First' }).click();
+      screen.getByRole('button', { name: 'Flush' }).click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('flush')).toHaveTextContent('saved');
+    expect(store.retireConfirmed).toHaveBeenCalledWith(expect.objectContaining({ generation: 1, markdown: 'first draft' }));
+
+    await act(async () => {
+      delayedPut.resolve();
+      await Promise.resolve();
+    });
+    expect(persisted.size).toBe(0);
   });
 
   it('flush returns saved when clean, error after a failed immediate save, and conflict after a version conflict', async () => {

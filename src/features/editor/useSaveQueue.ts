@@ -167,7 +167,7 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository, opt
         dirtyCycleStartedAt.current = null;
         const record = recoveryRecord.current;
         if (record && record.generation === savedGeneration) {
-          void recoveryStore.current.deleteIfCurrent(record);
+          void recoveryStore.current.retireConfirmed(record);
           recoveryRecord.current = null;
         }
         setStatus(revisionPrunePending.current ? 'prunePending' : 'saved');
@@ -185,7 +185,7 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository, opt
         dirtyCycleStartedAt.current = null;
         const record = recoveryRecord.current;
         if (record && record.generation === savedGeneration) {
-          void recoveryStore.current.deleteIfCurrent(record);
+          void recoveryStore.current.retireConfirmed(record);
           recoveryRecord.current = null;
         }
         setStatus('prunePending');

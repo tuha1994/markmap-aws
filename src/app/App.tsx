@@ -188,7 +188,7 @@ export function PrivateWorkspace() {
 
   function selectMap(mapId: string) {
     if (mapId === selectedMapId) return;
-    if (saveStatusRef.current === 'saved') {
+    if (saveStatusRef.current === 'saved' || saveStatusRef.current === 'prunePending') {
       setPendingMapId(null);
       setSelectedMapId(mapId);
       return;

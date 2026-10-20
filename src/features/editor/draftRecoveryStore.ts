@@ -36,6 +36,11 @@ export interface DraftRecoveryStore {
   list(uid: string, mapId: string): Promise<DraftRecoveryRecord[]>;
   put(record: DraftRecoveryRecord): Promise<boolean>;
   deleteIfCurrent(identity: DraftRecoveryIdentity): Promise<boolean>;
+  /**
+   * Retires a Firestore-confirmed record, including when its put has not
+   * arrived yet, so a delayed write cannot recreate the draft.
+   */
+  retireConfirmed(record: DraftRecoveryRecord): Promise<boolean>;
 }
 
 export function createDraftRecoveryStore(adapter: RecoveryStorageAdapter): DraftRecoveryStore {
@@ -47,6 +52,7 @@ export function createDraftRecoveryStore(adapter: RecoveryStorageAdapter): Draft
     async put(record) {
       return adapter.runTransaction(async (transaction) => {
         const current = await transaction.get(record);
+        if (current && isTombstone(current) && record.generation <= current.generation) return false;
         const storedRecord = record.recordVersion === 0
           ? { ...record, recordVersion: (current?.recordVersion ?? 0) + 1 }
           : record;
@@ -66,6 +72,23 @@ export function createDraftRecoveryStore(adapter: RecoveryStorageAdapter): Draft
         }
 
         await transaction.delete(identity);
+        return true;
+      });
+    },
+
+    async retireConfirmed(record) {
+      return adapter.runTransaction(async (transaction) => {
+        const current = await transaction.get(record);
+        if (!current) {
+          await transaction.delete(record);
+          return true;
+        }
+        if (isTombstone(current)) {
+          return current.generation === record.generation && current.recordVersion === record.recordVersion;
+        }
+        if (current.generation !== record.generation || current.recordVersion !== record.recordVersion) return false;
+
+        await transaction.delete(record);
         return true;
       });
     }
@@ -169,6 +192,13 @@ export function createBrowserDraftRecoveryStore(): DraftRecoveryStore {
     async deleteIfCurrent(identity) {
       try {
         return await store.deleteIfCurrent(identity);
+      } catch {
+        return false;
+      }
+    },
+    async retireConfirmed(record) {
+      try {
+        return await store.retireConfirmed(record);
       } catch {
         return false;
       }

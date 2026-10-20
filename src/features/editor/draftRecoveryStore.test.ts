@@ -127,6 +127,15 @@ describe('DraftRecoveryStore', () => {
     await expect(store.list('user-a', 'map-1')).resolves.toEqual([]);
   });
 
+  it('retires an unresolved current put before its delayed write can arrive', async () => {
+    const store = createDraftRecoveryStore(new InMemoryRecoveryAdapter());
+    const unresolved = record({ generation: 1, recordVersion: 0, markdown: '# Confirmed before put' });
+
+    await expect(store.retireConfirmed(unresolved)).resolves.toBe(true);
+    await expect(store.put(unresolved)).resolves.toBe(false);
+    await expect(store.list('user-a', 'map-1')).resolves.toEqual([]);
+  });
+
   it('resolves safely and retries after blocked and rejected IndexedDB opens', async () => {
     const open = vi.fn(() => {
       const request = {} as IDBOpenDBRequest;

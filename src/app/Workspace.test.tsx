@@ -6,6 +6,7 @@ import { makeFolder, makeMindMap } from '../test/factories';
 import { moveMapsAndArchiveFolder, subscribeFolders } from '../features/folders/folderRepository';
 import { createRevisionAndSaveMap, listRevisions } from '../features/history/revisionRepository';
 import { archiveMindMap, createMindMap, updateMindMapVersioned } from '../features/mindmaps/mindMapRepository';
+import type { SaveQueue } from '../features/editor/useSaveQueue';
 import { PrivateWorkspace } from './App';
 const workspaceStyles = readFileSync('src/styles/workspace.css', 'utf8');
 
@@ -17,6 +18,7 @@ const previewAdapter = vi.hoisted(() => ({
   zoomOut: vi.fn(),
   reset: vi.fn()
 }));
+const saveQueueOverride = vi.hoisted(() => ({ current: null as (() => SaveQueue) | null }));
 
 vi.mock('../features/auth/AuthProvider', () => ({
   useAuth: () => auth.current
@@ -48,6 +50,13 @@ vi.mock('../features/history/revisionRepository', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../features/history/revisionRepository')>();
   return { ...actual, createRevisionAndSaveMap: vi.fn(), listRevisions: vi.fn(), restoreRevision: vi.fn() };
 });
+vi.mock('../features/editor/useSaveQueue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../features/editor/useSaveQueue')>();
+  return {
+    ...actual,
+    useSaveQueue: (...args: Parameters<typeof actual.useSaveQueue>) => saveQueueOverride.current ? saveQueueOverride.current() : actual.useSaveQueue(...args)
+  };
+});
 vi.mock('../features/preview/markmapAdapter', () => ({
   createMarkmapAdapter: vi.fn(() => ({
     render: vi.fn().mockResolvedValue(undefined),
@@ -75,6 +84,7 @@ describe('PrivateWorkspace', () => {
     previewAdapter.zoomIn.mockClear();
     previewAdapter.zoomOut.mockClear();
     previewAdapter.reset.mockClear();
+    saveQueueOverride.current = null;
     window.localStorage.clear();
     auth.current = signedIn();
     const map = { ...makeMindMap({ title: 'Architecture' }), id: 'map-1' };
@@ -272,6 +282,31 @@ describe('PrivateWorkspace', () => {
 
     expect(screen.getByRole('heading', { name: 'Product' })).toBeInTheDocument();
     expect(mockedUpdateMindMapVersioned).not.toHaveBeenCalled();
+  });
+
+  it('switches a prune-pending map immediately without saving Markdown or retrying cleanup', () => {
+    mapList.current = {
+      maps: [
+        { ...makeMindMap({ title: 'Architecture', markdown: '# Architecture', revisionPrunePending: true }), id: 'map-1' },
+        { ...makeMindMap({ title: 'Product', markdown: '# Product' }), id: 'map-2' }
+      ],
+      loading: false,
+      error: null
+    };
+    const flush = vi.fn(() => new Promise<'saved'>(() => {}));
+    saveQueueOverride.current = () => ({
+      draft: '# Architecture', setDraft: vi.fn(), status: 'prunePending', conflict: null,
+      retry: vi.fn(), saveVersion: vi.fn(), flush, resolveConflict: vi.fn()
+    });
+    render(<PrivateWorkspace />);
+
+    expect(screen.getByRole('region', { name: 'Save status' })).toHaveTextContent('Saved');
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Workspace navigation' })).getByRole('button', { name: 'Product' }));
+
+    expect(screen.getByRole('heading', { name: 'Product' })).toBeInTheDocument();
+    expect(flush).not.toHaveBeenCalled();
+    expect(mockedUpdateMindMapVersioned).not.toHaveBeenCalled();
+    expect(mockedCreateRevisionAndSaveMap).not.toHaveBeenCalled();
   });
 
   it('keeps the current map and draft when navigation flush reports an error', async () => {
