@@ -43,6 +43,24 @@ class AllocatedButUnresolvedRecoveryAdapter implements RecoveryStorageAdapter {
   }
 }
 
+class InMemoryRecoveryAdapter implements RecoveryStorageAdapter {
+  private readonly entries = new Map<string, DraftRecoveryRecord | { uid: string; mapId: string; writerId: string; generation: number; recordVersion: number; deleted: true }>();
+
+  async runTransaction<T>(operation: (transaction: RecoveryStorageTransaction) => Promise<T>): Promise<T> {
+    return operation({
+      get: async (identity) => this.entries.get(`${identity.uid}\u0000${identity.mapId}\u0000${identity.writerId}`),
+      list: async (uid, mapId) => [...this.entries.values()]
+        .filter((entry): entry is DraftRecoveryRecord => !('deleted' in entry) && entry.uid === uid && entry.mapId === mapId),
+      put: async (record) => {
+        this.entries.set(`${record.uid}\u0000${record.mapId}\u0000${record.writerId}`, { ...record });
+      },
+      delete: async (identity) => {
+        this.entries.set(`${identity.uid}\u0000${identity.mapId}\u0000${identity.writerId}`, { ...identity, deleted: true });
+      }
+    });
+  }
+}
+
 type QueueOptions = {
   recoveryStore?: DraftRecoveryStore;
   timing?: SaveQueueTiming;
@@ -100,6 +118,7 @@ function SaveQueueHarness({ repository, map = { id: 'map-1', ...makeMindMap() },
       <output data-testid="flush" />
       <button onClick={() => queue.setDraft('first draft')}>First</button>
       <button onClick={() => queue.setDraft('second draft')}>Second</button>
+      <button onClick={() => queue.setDraft(map.markdown)}>Confirmed</button>
       <button onClick={() => queue.retry()}>Retry</button>
       <button onClick={() => queue.saveVersion()}>Save version</button>
       <button onClick={() => queue.resolveConflict('keepMine')}>Keep mine</button>
@@ -656,6 +675,37 @@ describe('useSaveQueue', () => {
       await Promise.resolve();
     });
     await expect(store.list('owner-uid', 'map-1')).resolves.toEqual([]);
+  });
+
+  it('retires a reverted no-op recovery cycle before starting a fresh trailing debounce', async () => {
+    const { timing, advanceBy } = controlledTiming();
+    const store = createDraftRecoveryStore(new InMemoryRecoveryAdapter());
+    const coordinator = {
+      writerId: 'writer-1', announceActive: vi.fn(), clearActive: vi.fn(),
+      subscribeToLiveWriters: vi.fn((_uid: string, _mapId: string, listener: (writerIds: string[]) => void) => { listener([]); return () => undefined; })
+    };
+    const update = vi.fn().mockResolvedValue({ status: 'updated', contentVersion: 2 });
+    const map = { id: 'map-1', ...makeMindMap({ markdown: '# Confirmed' }) };
+    render(<SaveQueueHarness repository={{ update }} map={map} options={{ recoveryStore: store, recoveryCoordinator: coordinator, timing }} />);
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'First' }).click();
+      screen.getByRole('button', { name: 'Confirmed' }).click();
+      screen.getByRole('button', { name: 'Flush' }).click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('status')).toHaveTextContent('saved');
+    expect(update).not.toHaveBeenCalled();
+    await expect(store.list('owner-uid', 'map-1')).resolves.toEqual([]);
+
+    await advanceBy(30_001);
+    await act(async () => { screen.getByRole('button', { name: 'First' }).click(); });
+    await advanceBy(4_999);
+    expect(update).not.toHaveBeenCalled();
+    await advanceBy(1);
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ markdown: 'first draft' }));
   });
 
   it('flush returns saved when clean, error after a failed immediate save, and conflict after a version conflict', async () => {

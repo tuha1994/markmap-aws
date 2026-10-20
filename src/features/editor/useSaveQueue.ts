@@ -125,6 +125,12 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository, opt
       return inFlightSave.current ?? Promise.resolve('error');
     }
     if (draftRef.current === confirmedMarkdown.current && mode === 'normal') {
+      dirtyCycleStartedAt.current = null;
+      const record = recoveryRecord.current;
+      if (record && record.generation === generation.current) {
+        void recoveryStore.current.retireConfirmed(record);
+        recoveryRecord.current = null;
+      }
       setStatus('saved');
       return Promise.resolve('saved');
     }
