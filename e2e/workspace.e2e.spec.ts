@@ -475,32 +475,47 @@ test('recovers a compatible browser IndexedDB draft after refresh with compact U
   await expectRecoveryDraft(page, draft);
 });
 
-test('keeps divergent two-context recovery drafts and shows both choices on emulator conflict', async ({ browser }) => {
-  const firstContext = await browser.newContext();
-  const secondContext = await browser.newContext();
-  const firstPage = await firstContext.newPage();
-  const secondPage = await secondContext.newPage();
+test('keeps divergent same-context tabs in shared IndexedDB and shows both choices on emulator conflict', async ({ browser }) => {
+  const context = await browser.newContext();
   const localDraft = '# E2E multi-tab local draft';
   const remoteDraft = '# E2E multi-tab competing draft';
 
-  await Promise.all([firstPage.goto('./'), secondPage.goto('./')]);
-  await Promise.all([signInToLocalWorkspace(firstPage), signInToLocalWorkspace(secondPage)]);
-  await Promise.all([selectMap(firstPage, 'E2E multi-tab map'), selectMap(secondPage, 'E2E multi-tab map')]);
-  await firstPage.getByRole('textbox', { name: 'Markdown' }).fill(localDraft);
-  await secondPage.getByRole('textbox', { name: 'Markdown' }).fill(remoteDraft);
-  await Promise.all([expectRecoveryDraft(firstPage, localDraft), expectRecoveryDraft(secondPage, remoteDraft)]);
+  try {
+    const firstPage = await context.newPage();
+    const secondPage = await context.newPage();
+    await Promise.all([firstPage.goto('./'), secondPage.goto('./')]);
+    await Promise.all([signInToLocalWorkspace(firstPage), signInToLocalWorkspace(secondPage)]);
+    await Promise.all([selectMap(firstPage, 'E2E multi-tab map'), selectMap(secondPage, 'E2E multi-tab map')]);
+    await firstPage.getByRole('textbox', { name: 'Markdown' }).fill(localDraft);
+    await secondPage.getByRole('textbox', { name: 'Markdown' }).fill(remoteDraft);
 
-  await secondPage.getByRole('button', { name: 'Save version' }).first().click();
-  const conflict = firstPage.getByRole('dialog', { name: 'Conflicting draft detected' });
-  await expect(conflict).toBeVisible();
-  await expect(firstPage.getByRole('region', { name: 'Save status' })).toHaveText('Error');
-  await expect(conflict.getByRole('region', { name: 'Your draft' })).toContainText(localDraft);
-  await expect(conflict.getByRole('region', { name: 'Competing draft' })).toContainText(remoteDraft);
-  await expectRecoveryDraft(firstPage, localDraft);
-  await expect.poll(async () => (await recoveryRecords(secondPage)).some((record) => record.markdown === remoteDraft)).toBe(false);
+    await expect.poll(async () => (await recoveryRecords(firstPage)).filter((record) => record.markdown === localDraft || record.markdown === remoteDraft)).toHaveLength(2);
+    const recoveryDrafts = (await recoveryRecords(firstPage)).filter((record) => record.markdown === localDraft || record.markdown === remoteDraft);
+    const localRecovery = recoveryDrafts.find((record) => record.markdown === localDraft)!;
+    const remoteRecovery = recoveryDrafts.find((record) => record.markdown === remoteDraft)!;
+    expect(localRecovery.uid).toBe(remoteRecovery.uid);
+    expect(localRecovery.mapId).toBe(remoteRecovery.mapId);
+    expect(localRecovery.writerId).not.toBe(remoteRecovery.writerId);
 
-  await firstContext.close();
-  await secondContext.close();
+    await secondPage.getByRole('button', { name: 'Save version' }).first().click();
+    await expect(secondPage.getByRole('region', { name: 'Save status' })).toHaveText('Saved');
+    await expect.poll(async () => {
+      const records = await recoveryRecords(firstPage);
+      return {
+        localWriterRemains: records.some((record) => record.writerId === localRecovery.writerId && record.markdown === localDraft),
+        savedWriterCleared: records.some((record) => record.writerId === remoteRecovery.writerId)
+      };
+    }).toEqual({ localWriterRemains: true, savedWriterCleared: false });
+
+    const conflict = firstPage.getByRole('dialog', { name: 'Conflicting draft detected' });
+    await expect(conflict).toBeVisible();
+    await expect(firstPage.getByRole('region', { name: 'Save status' })).toHaveText('Error');
+    await expect(conflict.getByRole('region', { name: 'Your draft' })).toContainText(localDraft);
+    await expect(conflict.getByRole('region', { name: 'Competing draft' })).toContainText(remoteDraft);
+    await expect.poll(async () => (await recoveryRecords(firstPage)).some((record) => record.writerId === localRecovery.writerId && record.markdown === localDraft)).toBe(true);
+  } finally {
+    await context.close();
+  }
 });
 
 test('does not publish explicit credential or internal-marker fixtures in emitted text assets', () => {
