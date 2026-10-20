@@ -21,6 +21,39 @@ async function signInToLocalWorkspace(page: Page, account: 'approved' | 'denied'
   await page.getByRole('button', { name: `Sign in as local ${account} test user` }).click();
 }
 
+async function selectMap(page: Page, title: string) {
+  await page.getByRole('button', { name: title, exact: true }).first().click();
+  await expect(page.getByLabel('Active map')).toContainText(title);
+}
+
+type RecoveryRecord = {
+  uid: string;
+  mapId: string;
+  writerId: string;
+  baseContentVersion: number;
+  markdown: string;
+  generation: number;
+  recordVersion: number;
+  updatedAtMs: number;
+};
+
+async function recoveryRecords(page: Page): Promise<RecoveryRecord[]> {
+  return page.evaluate(async () => new Promise<RecoveryRecord[]>((resolve, reject) => {
+    const request = indexedDB.open('markmap-aws-draft-recovery');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const transaction = request.result.transaction('drafts', 'readonly');
+      const records = transaction.objectStore('drafts').getAll();
+      records.onerror = () => reject(records.error);
+      records.onsuccess = () => resolve(records.result.filter((record): record is RecoveryRecord => !('deleted' in record && record.deleted === true)));
+    };
+  }));
+}
+
+async function expectRecoveryDraft(page: Page, markdown: string, timeout = 1_000) {
+  await expect.poll(async () => (await recoveryRecords(page)).some((record) => record.markdown === markdown), { timeout }).toBe(true);
+}
+
 
 type EditorGeometry = {
   editor: { x: number; width: number };
@@ -356,6 +389,115 @@ test('shows a conflict in one browser page after another page writes', async ({ 
   await expect(conflict.getByText('# Remote device draft')).toBeVisible();
   await conflict.getByRole('button', { name: 'Use competing draft' }).click();
   await expect(firstPage.getByRole('textbox', { name: 'Markdown' })).toHaveValue('# Remote device draft');
+
+  await firstContext.close();
+  await secondContext.close();
+});
+
+test('forces a max-wait autosave under continuous typing and reloads the latest cloud markdown', async ({ page }) => {
+  await page.clock.install({ time: new Date('2025-01-01T00:00:00Z') });
+  await page.goto('./');
+  await signInToLocalWorkspace(page);
+  await selectMap(page, 'E2E autosave map');
+
+  const editor = page.getByRole('textbox', { name: 'Markdown' });
+  const status = page.getByRole('region', { name: 'Save status' });
+  let latest = '';
+  for (let second = 0; second < 30; second += 4) {
+    latest = `# E2E max-wait ${second}`;
+    await editor.fill(latest);
+    if (second < 28) await page.clock.runFor(4_000);
+  }
+  await expect(status).toContainText('Unsaved');
+  await page.clock.runFor(1_500);
+  await expect(status).toContainText('Unsaved');
+  await page.clock.runFor(500);
+  await page.clock.resume();
+  await expect(status).toContainText('Saved');
+
+  await page.reload();
+  await expect(page.getByRole('textbox', { name: 'Markdown' })).toHaveValue(latest);
+});
+
+test('flushes a dirty navigation target only after save and preserves the four-label status contract', async ({ page }) => {
+  await page.goto('./');
+  await signInToLocalWorkspace(page);
+  await selectMap(page, 'E2E navigation source');
+
+  const draft = '# E2E navigation draft';
+  await page.getByRole('textbox', { name: 'Markdown' }).fill(draft);
+  await expect(page.getByRole('region', { name: 'Save status' })).toHaveText('Unsaved');
+  await page.getByRole('button', { name: 'E2E navigation target', exact: true }).first().click();
+
+  await expect(page.getByLabel('Active map')).toContainText('E2E navigation target');
+  await expect(page.getByRole('region', { name: 'Save status' })).toHaveText('Saved');
+  await selectMap(page, 'E2E navigation source');
+  await expect(page.getByRole('textbox', { name: 'Markdown' })).toHaveValue(draft);
+});
+
+test('retains a dirty map and its target through offline navigation before switching after online recovery', async ({ page, context }) => {
+  await page.goto('./');
+  await signInToLocalWorkspace(page);
+  await selectMap(page, 'E2E offline source');
+
+  const draft = '# E2E offline navigation draft';
+  await page.getByRole('textbox', { name: 'Markdown' }).fill(draft);
+  await context.setOffline(true);
+  await page.getByRole('button', { name: 'E2E offline target', exact: true }).first().click();
+
+  const status = page.getByRole('region', { name: 'Save status' });
+  await expect(status).toHaveText('ErrorDraft is kept locally when possible; recovery is pending.Retry');
+  await expect(page.getByLabel('Active map')).toContainText('E2E offline source');
+  await expect(page.getByRole('textbox', { name: 'Markdown' })).toHaveValue(draft);
+  await expectRecoveryDraft(page, draft);
+
+  await context.setOffline(false);
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await expect(page.getByLabel('Active map')).toContainText('E2E offline target');
+  await expect(page.getByRole('region', { name: 'Save status' })).toHaveText('Saved');
+  await selectMap(page, 'E2E offline source');
+  await expect(page.getByRole('textbox', { name: 'Markdown' })).toHaveValue(draft);
+});
+
+test('recovers a compatible browser IndexedDB draft after refresh with compact Unsaved status', async ({ page }) => {
+  await page.goto('./');
+  await signInToLocalWorkspace(page);
+  await selectMap(page, 'E2E recovery map');
+
+  const draft = '# E2E refresh recovery draft';
+  await page.getByRole('textbox', { name: 'Markdown' }).fill(draft);
+  await expectRecoveryDraft(page, draft);
+  await page.reload();
+  await selectMap(page, 'E2E recovery map');
+
+  await expect(page.getByRole('textbox', { name: 'Markdown' })).toHaveValue(draft);
+  await expect(page.getByRole('region', { name: 'Save status' })).toHaveText('Unsaved');
+  await expectRecoveryDraft(page, draft);
+});
+
+test('keeps divergent two-context recovery drafts and shows both choices on emulator conflict', async ({ browser }) => {
+  const firstContext = await browser.newContext();
+  const secondContext = await browser.newContext();
+  const firstPage = await firstContext.newPage();
+  const secondPage = await secondContext.newPage();
+  const localDraft = '# E2E multi-tab local draft';
+  const remoteDraft = '# E2E multi-tab competing draft';
+
+  await Promise.all([firstPage.goto('./'), secondPage.goto('./')]);
+  await Promise.all([signInToLocalWorkspace(firstPage), signInToLocalWorkspace(secondPage)]);
+  await Promise.all([selectMap(firstPage, 'E2E multi-tab map'), selectMap(secondPage, 'E2E multi-tab map')]);
+  await firstPage.getByRole('textbox', { name: 'Markdown' }).fill(localDraft);
+  await secondPage.getByRole('textbox', { name: 'Markdown' }).fill(remoteDraft);
+  await Promise.all([expectRecoveryDraft(firstPage, localDraft), expectRecoveryDraft(secondPage, remoteDraft)]);
+
+  await secondPage.getByRole('button', { name: 'Save version' }).first().click();
+  const conflict = firstPage.getByRole('dialog', { name: 'Conflicting draft detected' });
+  await expect(conflict).toBeVisible();
+  await expect(firstPage.getByRole('region', { name: 'Save status' })).toHaveText('Error');
+  await expect(conflict.getByRole('region', { name: 'Your draft' })).toContainText(localDraft);
+  await expect(conflict.getByRole('region', { name: 'Competing draft' })).toContainText(remoteDraft);
+  await expectRecoveryDraft(firstPage, localDraft);
+  await expect.poll(async () => (await recoveryRecords(secondPage)).some((record) => record.markdown === remoteDraft)).toBe(false);
 
   await firstContext.close();
   await secondContext.close();

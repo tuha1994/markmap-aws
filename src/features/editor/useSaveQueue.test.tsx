@@ -246,12 +246,12 @@ describe('useSaveQueue', () => {
     vi.useRealTimers();
   });
 
-  it('retries an in-memory offline draft after connectivity returns', async () => {
+  it('retries an in-memory offline draft after connectivity returns without starting an offline transaction', async () => {
     vi.useFakeTimers();
     const originalOnline = Object.getOwnPropertyDescriptor(navigator, 'onLine');
     Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
     const repository: SaveRepository = {
-      update: vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ status: 'updated', contentVersion: 2 })
+      update: vi.fn().mockResolvedValue({ status: 'updated', contentVersion: 2 })
     };
     render(<SaveQueueHarness repository={repository} />);
 
@@ -260,13 +260,14 @@ describe('useSaveQueue', () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
     expect(screen.getByTestId('status')).toHaveTextContent('offlinePending');
+    expect(repository.update).not.toHaveBeenCalled();
 
     Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
     await act(async () => {
       window.dispatchEvent(new Event('online'));
       await Promise.resolve();
     });
-    expect(repository.update).toHaveBeenCalledTimes(2);
+    expect(repository.update).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('status')).toHaveTextContent('saved');
 
     if (originalOnline) {

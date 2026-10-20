@@ -59,6 +59,33 @@ export default async function globalSetup() {
       createdAt: now,
       updatedAt: now
     });
+    await Promise.all([
+      ['e2e-autosave-map', 'E2E autosave map'],
+      ['e2e-navigation-source', 'E2E navigation source'],
+      ['e2e-navigation-target', 'E2E navigation target'],
+      ['e2e-offline-source', 'E2E offline source'],
+      ['e2e-offline-target', 'E2E offline target'],
+      ['e2e-recovery-map', 'E2E recovery map'],
+      ['e2e-multi-tab-map', 'E2E multi-tab map']
+    ].map(async ([id, title], index) => {
+      const timestamp = new Date(now.getTime() - (index + 1) * 1000);
+      await setDoc(doc(database, 'mindMaps', id), {
+        ownerUid: approved.localId,
+        folderId: null,
+        title,
+        titleLower: title.toLocaleLowerCase(),
+        markdown: `# ${title}`,
+        contentSearchText: `# ${title.toLocaleLowerCase()}`,
+        contentVersion: 1,
+        currentRevisionId: null,
+        currentRevisionAt: null,
+        revisionPrunePending: false,
+        deletedAt: null,
+        deletedByUid: null,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      });
+    }));
   });
   await testEnvironment.cleanup();
   if (!unapproved.localId) throw new Error('The unapproved Auth Emulator user was not created.');

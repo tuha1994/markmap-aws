@@ -117,6 +117,10 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository, opt
     clearTimer();
     if (requestedMapSession !== mapSession.current) return Promise.resolve('error');
     if (conflictRef.current !== null) return Promise.resolve('conflict');
+    if (isOffline()) {
+      setStatus('offlinePending');
+      return Promise.resolve('error');
+    }
     if (inFlight.current) {
       return (inFlightSave.current ?? Promise.resolve('error')).then(() => saveRef.current!(requestedMapSession, mode));
     }
