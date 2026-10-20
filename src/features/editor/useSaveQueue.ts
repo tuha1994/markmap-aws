@@ -386,25 +386,35 @@ export function useSaveQueue(map: StoredMindMap, repository: SaveRepository, opt
     void store.list(recoveryMap.ownerUid, recoveryMap.id).then((records) => {
       if (!active || recoverySession !== mapSession.current) return;
       if (draftRef.current !== recoveryReadDraft || generation.current !== recoveryReadGeneration || recoveryRecord.current !== null) return;
-      const ownRecords = records.filter((record) => record.writerId === coordinator.writerId);
-      const ownRecord = ownRecords.length === 1 ? ownRecords[0] : undefined;
-      if (!ownRecord) return;
-      generation.current = Math.max(generation.current, ownRecord.generation);
-      if (ownRecord.markdown === recoveryMap.markdown) {
-        void store.deleteIfCurrent(ownRecord);
+      const divergentRecords = records.filter((record) => record.markdown !== recoveryMap.markdown);
+      const ownEqualRecords = records.filter((record) => record.writerId === coordinator.writerId && record.markdown === recoveryMap.markdown);
+      for (const ownEqualRecord of ownEqualRecords) {
+        void store.deleteIfCurrent(ownEqualRecord);
+      }
+
+      const ownDivergentRecords = divergentRecords.filter((record) => record.writerId === coordinator.writerId);
+      const ownDivergentRecord = ownDivergentRecords.length === 1 ? ownDivergentRecords[0] : undefined;
+      if (ownDivergentRecord) {
+        generation.current = Math.max(generation.current, ownDivergentRecord.generation);
+      }
+      if (divergentRecords.length === 0) return;
+
+      const canHydrateOwnRecord = !liveSecondWriter
+        && divergentRecords.length === 1
+        && ownDivergentRecord !== undefined
+        && ownDivergentRecord.baseContentVersion === recoveryMap.contentVersion;
+      if (!canHydrateOwnRecord) {
+        const conflictRecord = ownDivergentRecord ?? divergentRecords[0];
+        recoveryRecord.current = conflictRecord;
+        openRecoveryConflict(conflictRecord);
         return;
       }
-      if (liveSecondWriter || records.length !== 1 || ownRecord.baseContentVersion !== recoveryMap.contentVersion) {
-        recoveryRecord.current = ownRecord;
-        openRecoveryConflict(ownRecord);
-        return;
-      }
-      recoveryRecord.current = ownRecord;
-      hydratedRecord = ownRecord;
-      draftRef.current = ownRecord.markdown;
-      generation.current = ownRecord.generation;
+      recoveryRecord.current = ownDivergentRecord;
+      hydratedRecord = ownDivergentRecord;
+      draftRef.current = ownDivergentRecord.markdown;
+      generation.current = ownDivergentRecord.generation;
       dirtyCycleStartedAt.current = timing.current.now();
-      setDraftState(ownRecord.markdown);
+      setDraftState(ownDivergentRecord.markdown);
       setStatus('unsaved');
       scheduleSave();
     });

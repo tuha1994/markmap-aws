@@ -597,12 +597,45 @@ describe('useSaveQueue', () => {
     expect(screen.getByTestId('conflict')).toHaveTextContent('# recovered|# Cloud foundations');
   });
 
-  it('does not auto-hydrate divergent recovery drafts from multiple writers', async () => {
-    const { options } = recoveryOptions([recoveryRecord(), recoveryRecord({ writerId: 'writer-2', markdown: '# other writer' })]);
+  it('opens conflict for another writer stale divergent record after retiring only this writer equal record', async () => {
+    const ownEqualRecord = recoveryRecord({ markdown: '# Cloud foundations' });
+    const otherStaleRecord = recoveryRecord({ writerId: 'writer-2', baseContentVersion: 2, markdown: '# other stale draft' });
+    const { options, store } = recoveryOptions([ownEqualRecord, otherStaleRecord]);
     render(<SaveQueueHarness repository={{ update: vi.fn() }} options={options} />);
+
     await act(async () => { await Promise.resolve(); });
+
+    expect(screen.getByTestId('status')).toHaveTextContent('conflict');
+    expect(screen.getByTestId('conflict')).toHaveTextContent('# other stale draft|# Cloud foundations');
+    expect(store.deleteIfCurrent).toHaveBeenCalledWith(ownEqualRecord);
+    expect(store.deleteIfCurrent).not.toHaveBeenCalledWith(otherStaleRecord);
+  });
+
+  it('hydrates the compatible current-writer divergent record while ignoring another writer equal record', async () => {
+    const ownCompatibleRecord = recoveryRecord({ markdown: '# current writer draft' });
+    const otherEqualRecord = recoveryRecord({ writerId: 'writer-2', markdown: '# Cloud foundations' });
+    const { options, store } = recoveryOptions([ownCompatibleRecord, otherEqualRecord]);
+    render(<SaveQueueHarness repository={{ update: vi.fn() }} options={options} />);
+
+    await act(async () => { await Promise.resolve(); });
+
+    expect(screen.getByTestId('draft')).toHaveTextContent('# current writer draft');
+    expect(screen.getByTestId('status')).toHaveTextContent('unsaved');
+    expect(store.deleteIfCurrent).not.toHaveBeenCalled();
+  });
+
+  it('opens conflict without hydration or deletion when multiple writers have divergent recovery records', async () => {
+    const ownRecord = recoveryRecord();
+    const otherRecord = recoveryRecord({ writerId: 'writer-2', markdown: '# other writer' });
+    const { options, store } = recoveryOptions([ownRecord, otherRecord]);
+    render(<SaveQueueHarness repository={{ update: vi.fn() }} options={options} />);
+
+    await act(async () => { await Promise.resolve(); });
+
     expect(screen.getByTestId('status')).toHaveTextContent('conflict');
     expect(screen.getByTestId('draft')).toHaveTextContent('# Cloud foundations');
+    expect(screen.getByTestId('conflict')).toHaveTextContent('# recovered|# Cloud foundations');
+    expect(store.deleteIfCurrent).not.toHaveBeenCalled();
   });
 
   it('retires only this writer recovery record when competing recovery is chosen', async () => {
